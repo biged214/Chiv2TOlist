@@ -14,7 +14,9 @@ const sessionSecret = process.env.SESSION_SECRET || "change-this-session-secret"
 const cookieName = "chiv2_admin";
 const dataDir = path.join(__dirname, "data");
 const playersFile = path.join(dataDir, "players.json");
-const hasDatabase = Boolean(process.env.DB_HOST && process.env.DB_NAME && process.env.DB_USER);
+function hasDatabase() {
+  return Boolean(process.env.DB_HOST && process.env.DB_NAME && process.env.DB_USER);
+}
 
 const tiers = [
   { id: "s", label: "S", name: "", color: "#7f1d1d" },
@@ -116,22 +118,33 @@ function requireAdmin(request, response, next) {
   next();
 }
 
-function normalizePlayer(input, fallback = {}) {
+function firstDefined(...values) {
+  return values.find((value) => value !== undefined && value !== null);
+}
+
+function cleanText(value, maxLength) {
+  return String(value ?? "").trim().slice(0, maxLength);
+}
+
+function normalizePlayer(input = {}, fallback = {}) {
+  const tier = firstDefined(input.tier, fallback.tier, "b");
+  const order = firstDefined(input.order, fallback.order, 1);
+
   return {
-    id: fallback.id || input.id || crypto.randomUUID(),
-    name: String(input.name || fallback.name || "").trim().slice(0, 40),
-    tier: tiers.some((tier) => tier.id === input.tier) ? input.tier : fallback.tier || "b",
-    region: String(input.region || fallback.region || "").trim().slice(0, 24),
-    role: String(input.role || fallback.role || "").trim().slice(0, 28),
-    clan: String(input.clan || fallback.clan || "").trim().slice(0, 28),
-    playfabId: String(input.playfabId || input.playfab_id || fallback.playfabId || "").trim().slice(0, 64),
-    notes: String(input.notes || fallback.notes || "").trim().slice(0, 180),
-    order: Number.isFinite(Number(input.order)) ? Number(input.order) : fallback.order || 1
+    id: cleanText(firstDefined(input.id, fallback.id, crypto.randomUUID()), 80),
+    name: cleanText(firstDefined(input.name, fallback.name), 40),
+    tier: tiers.some((item) => item.id === tier) ? tier : "b",
+    region: cleanText(firstDefined(input.region, fallback.region), 24),
+    role: cleanText(firstDefined(input.role, fallback.role), 28),
+    clan: cleanText(firstDefined(input.clan, fallback.clan), 28),
+    playfabId: cleanText(firstDefined(input.playfabId, input.playfab_id, fallback.playfabId, fallback.playfab_id), 64),
+    notes: cleanText(firstDefined(input.notes, fallback.notes), 180),
+    order: Number.isFinite(Number(order)) ? Number(order) : 1
   };
 }
 
 async function readPlayers() {
-  if (hasDatabase) return readPlayersFromDatabase();
+  if (hasDatabase()) return readPlayersFromDatabase();
   return readPlayersFromFile();
 }
 
@@ -148,7 +161,7 @@ async function readPlayersFromFile() {
 }
 
 async function writePlayers(players) {
-  if (hasDatabase) {
+  if (hasDatabase()) {
     await writePlayersToDatabase(players);
     return;
   }
@@ -179,23 +192,40 @@ async function withDatabase(callback) {
 
 async function ensurePlayersTable(connection) {
   await connection.execute(`
-    CREATE TABLE IF NOT EXISTS players (
-      id VARCHAR(80) PRIMARY KEY,
-      name VARCHAR(40) NOT NULL,
-      tier VARCHAR(20) NOT NULL,
-      region VARCHAR(24) DEFAULT '',
-      role VARCHAR(28) DEFAULT '',
-      clan VARCHAR(28) DEFAULT '',
-      playfab_id VARCHAR(64) DEFAULT '',
-      notes VARCHAR(180) DEFAULT '',
-      sort_order INT NOT NULL DEFAULT 1,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    CREATE TABLE IF NOT EXISTS \`players\` (
+      \`id\` VARCHAR(80) PRIMARY KEY,
+      \`name\` VARCHAR(40) NOT NULL,
+      \`tier\` VARCHAR(20) NOT NULL,
+      \`region\` VARCHAR(24) DEFAULT '',
+      \`role\` VARCHAR(28) DEFAULT '',
+      \`clan\` VARCHAR(28) DEFAULT '',
+      \`playfab_id\` VARCHAR(64) DEFAULT '',
+      \`notes\` VARCHAR(180) DEFAULT '',
+      \`sort_order\` INT NOT NULL DEFAULT 1,
+      \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   `);
 
-  const [columns] = await connection.execute("SHOW COLUMNS FROM players LIKE 'playfab_id'");
-  if (!columns.length) {
-    await connection.execute("ALTER TABLE players ADD COLUMN playfab_id VARCHAR(64) DEFAULT '' AFTER clan");
+  const [columns] = await connection.execute("SHOW COLUMNS FROM `players`");
+  const columnNames = new Set(columns.map((column) => column.Field));
+  const requiredColumns = [
+    ["region", "VARCHAR(24) DEFAULT '' AFTER `tier`"],
+    ["role", "VARCHAR(28) DEFAULT '' AFTER `region`"],
+    ["clan", "VARCHAR(28) DEFAULT '' AFTER `role`"],
+    ["playfab_id", "VARCHAR(64) DEFAULT '' AFTER `clan`"],
+    ["notes", "VARCHAR(180) DEFAULT '' AFTER `playfab_id`"],
+    ["sort_order", "INT NOT NULL DEFAULT 1 AFTER `notes`"],
+    ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER `sort_order`"]
+  ];
+
+  for (const [name, definition] of requiredColumns) {
+    if (!columnNames.has(name)) {
+      await connection.execute(`ALTER TABLE \`players\` ADD COLUMN \`${name}\` ${definition}`);
+    }
+  }
+
+  if (columnNames.has("playfabId") && !columnNames.has("playfab_id")) {
+    await connection.execute("UPDATE `players` SET `playfab_id` = `playfabId` WHERE `playfab_id` = '' OR `playfab_id` IS NULL");
   }
 }
 
@@ -215,7 +245,9 @@ function rowToPlayer(row) {
 
 async function readPlayersFromDatabase() {
   return withDatabase(async (connection) => {
-    const [rows] = await connection.execute("SELECT * FROM players ORDER BY sort_order ASC, name ASC");
+    const [rows] = await connection.execute(
+      "SELECT `id`, `name`, `tier`, `region`, `role`, `clan`, `playfab_id`, `notes`, `sort_order` FROM `players` ORDER BY `sort_order` ASC, `name` ASC"
+    );
     if (rows.length) return rows.map(rowToPlayer);
 
     const seededPlayers = await readPlayersFromFile();
@@ -229,10 +261,10 @@ async function writePlayersToDatabase(players) {
     const sortedPlayers = players.map((player) => normalizePlayer(player)).sort(byOrder);
     await connection.beginTransaction();
     try {
-      await connection.execute("DELETE FROM players");
+      await connection.execute("DELETE FROM `players`");
       for (const player of sortedPlayers) {
         await connection.execute(
-          `INSERT INTO players (id, name, tier, region, role, clan, playfab_id, notes, sort_order)
+          `INSERT INTO \`players\` (\`id\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`playfab_id\`, \`notes\`, \`sort_order\`)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             player.id,
