@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-label="Medieval battlefield banner">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#161617"/>
+      <stop offset="0.46" stop-color="#43322c"/>
+      <stop offset="1" stop-color="#8c4c2c"/>
+    </linearGradient>
+    <linearGradient id="fire" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#7f1d1d"/>
+      <stop offset="1" stop-color="#d79a42"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="66%" cy="55%" r="46%">
+      <stop offset="0" stop-color="#d79a42" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#d79a42" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1600" height="900" fill="url(#sky)"/>
+  <rect width="1600" height="900" fill="url(#glow)"/>
+  <path d="M0 640 C220 570 380 610 590 560 C840 500 1020 560 1220 515 C1380 480 1500 500 1600 460 L1600 900 L0 900 Z" fill="#201b18"/>
+  <path d="M0 715 C260 655 430 700 680 635 C910 575 1110 665 1370 600 C1480 572 1550 585 1600 558 L1600 900 L0 900 Z" fill="#141313"/>
+  <g opacity="0.9">
+    <rect x="1115" y="260" width="310" height="330" fill="#2c2928"/>
+    <rect x="1138" y="285" width="52" height="88" fill="#151414"/>
+    <rect x="1225" y="285" width="52" height="88" fill="#151414"/>
+    <rect x="1312" y="285" width="52" height="88" fill="#151414"/>
+    <path d="M1060 260 L1478 260 L1438 202 L1100 202 Z" fill="#3a3532"/>
+    <path d="M1082 200 L1130 132 L1180 200 Z M1215 200 L1263 132 L1313 200 Z M1348 200 L1396 132 L1446 200 Z" fill="#332f2d"/>
+  </g>
+  <g>
+    <rect x="252" y="270" width="14" height="335" fill="#1d1a19"/>
+    <path d="M266 280 L430 318 L266 362 Z" fill="#8c2f2b"/>
+    <rect x="342" y="334" width="12" height="275" fill="#1d1a19"/>
+    <path d="M354 344 L505 380 L354 424 Z" fill="#c8953e"/>
+  </g>
+  <g fill="#0f0f10">
+    <path d="M675 610 l25 -95 l25 95 z"/>
+    <circle cx="700" cy="492" r="20"/>
+    <rect x="690" y="512" width="20" height="115"/>
+    <path d="M885 625 l28 -120 l28 120 z"/>
+    <circle cx="913" cy="482" r="22"/>
+    <rect x="902" y="505" width="22" height="135"/>
+    <path d="M1000 625 l20 -85 l20 85 z"/>
+    <circle cx="1020" cy="522" r="17"/>
+    <rect x="1011" y="540" width="18" height="95"/>
+  </g>
+  <g opacity="0.65">
+    <circle cx="114" cy="648" r="58" fill="url(#fire)"/>
+    <circle cx="1460" cy="592" r="72" fill="url(#fire)"/>
+    <rect x="100" y="650" width="28" height="110" fill="#171313"/>
+    <rect x="1446" y="600" width="28" height="130" fill="#171313"/>
+  </g>
+  <rect width="1600" height="900" fill="#000" opacity="0.16"/>
+</svg>
