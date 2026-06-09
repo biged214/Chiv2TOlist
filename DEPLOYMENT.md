@@ -4,24 +4,39 @@ This first version is a static website. That means it can go live quickly, but a
 
 For a public launch, use this version to show the tier list. For real admin control that updates the public site for everyone, the next build step is adding Supabase.
 
-## Fastest Option: Netlify Drop
+## GitHub Pages With GoDaddy
 
-1. Go to `https://app.netlify.com/drop`.
-2. Drag in `chiv2-to-tier-list-site.zip`.
-3. Netlify gives you a live website link.
-4. You can rename the site inside Netlify's site settings.
+Your custom domain is:
 
-This is the easiest option when you are just getting started.
+`chivalrytierlist.com`
 
-## Vercel Option
+A `CNAME` file has already been added to this repository with that domain.
 
-1. Create a GitHub repository for these files.
-2. Go to `https://vercel.com/new`.
-3. Import the GitHub repository.
-4. Choose `Other` if Vercel asks for a framework.
-5. Leave the build command blank.
-6. Set the output directory to `.` if it asks.
-7. Deploy.
+In GitHub:
+
+1. Open `biged214/Chiv2TOlist`.
+2. Go to Settings.
+3. Go to Pages.
+4. Set the source to deploy from the `main` branch and root folder.
+5. Confirm the custom domain is `chivalrytierlist.com`.
+6. After DNS finishes updating, turn on Enforce HTTPS if GitHub allows it.
+
+In GoDaddy DNS, add these records for the root domain:
+
+| Type | Name | Value |
+| --- | --- | --- |
+| A | @ | 185.199.108.153 |
+| A | @ | 185.199.109.153 |
+| A | @ | 185.199.110.153 |
+| A | @ | 185.199.111.153 |
+
+For `www.chivalrytierlist.com`, add:
+
+| Type | Name | Value |
+| --- | --- | --- |
+| CNAME | www | biged214.github.io |
+
+DNS updates can take a while. GitHub says they can take up to 24 hours.
 
 ## What To Do Before Sharing
 
@@ -38,6 +53,6 @@ The next version should use:
 - Supabase database
 - Real admin login
 - Public data that updates for everyone
-- Hosting on Vercel or Netlify
+- Hosting on GitHub Pages, Vercel, or Netlify
 
 That is the point where this changes from a local editable prototype into a proper live admin-managed website.
