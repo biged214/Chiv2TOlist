@@ -15,6 +15,7 @@ const playerTier = document.querySelector("#playerTier");
 const playerRegion = document.querySelector("#playerRegion");
 const playerRole = document.querySelector("#playerRole");
 const playerClan = document.querySelector("#playerClan");
+const playerPlayfabId = document.querySelector("#playerPlayfabId");
 const playerNotes = document.querySelector("#playerNotes");
 const adminList = document.querySelector("#adminList");
 const adminWorkspace = document.querySelector("#adminWorkspace");
@@ -67,7 +68,7 @@ function renderAdminList() {
     item.innerHTML = `
       <div>
         <strong>${escapeHtml(player.name)}</strong>
-        <span>${escapeHtml(tier?.label || player.tier)} tier - ${escapeHtml(player.region || "Unknown region")} - ${escapeHtml(player.role || "Flexible")}</span>
+        <span>${escapeHtml(tier?.label || player.tier)} tier - ${escapeHtml(player.region || "Unknown region")} - ${escapeHtml(player.role || "Flexible")}${player.playfabId ? " - Stats linked" : ""}</span>
       </div>
       <div class="admin-actions">
         <button class="mini-button" type="button" data-action="up" data-id="${player.id}" title="Move up">Up</button>
@@ -101,6 +102,7 @@ async function savePlayer(event) {
     region: playerRegion.value.trim(),
     role: playerRole.value.trim(),
     clan: playerClan.value.trim(),
+    playfabId: playerPlayfabId.value.trim(),
     notes: playerNotes.value.trim()
   };
 
@@ -137,6 +139,7 @@ adminList.addEventListener("click", (event) => {
     playerRegion.value = player.region;
     playerRole.value = player.role;
     playerClan.value = player.clan;
+    playerPlayfabId.value = player.playfabId || "";
     playerNotes.value = player.notes;
     playerName.focus();
   }
@@ -209,5 +212,11 @@ async function init() {
 }
 
 init().catch((error) => {
-  adminList.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  const message =
+    window.location.protocol === "file:"
+      ? "Open this page through the local server at http://localhost:3000/admin so it can load player data."
+      : error.message;
+  adminLock.hidden = false;
+  adminWorkspace.hidden = true;
+  adminLock.insertAdjacentHTML("beforeend", `<p class="hint">${escapeHtml(message)}</p>`);
 });
