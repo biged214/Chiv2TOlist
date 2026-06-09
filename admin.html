@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin - Chivalry 2 TO Tier List</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="hero hero--admin">
+      <div class="hero__shade"></div>
+      <nav class="topbar" aria-label="Admin navigation">
+        <a class="brand" href="/">TO Tier List</a>
+        <div class="topbar__actions">
+          <a class="button button--ghost" href="/">View Site</a>
+        </div>
+      </nav>
+      <section class="hero__content">
+        <p class="eyebrow">Private Admin</p>
+        <h1>Manage player rankings.</h1>
+        <p class="hero__copy">Add players, update tiers, reorder placements, and export your current list.</p>
+      </section>
+    </header>
+
+    <main>
+      <section class="admin-panel" id="admin">
+        <div class="admin-panel__head">
+          <div>
+            <p class="eyebrow">Admin Control</p>
+            <h2>Manage the list</h2>
+          </div>
+          <div class="topbar__actions">
+            <button class="button button--dark" id="exportData" type="button">Export Data</button>
+            <button class="button button--ghost" id="resetDemo" type="button">Reset Demo</button>
+          </div>
+        </div>
+
+        <div class="admin-lock" id="adminLock">
+          <label>
+            <span>Admin password</span>
+            <input id="adminCode" type="password" placeholder="Enter admin password">
+          </label>
+          <button class="button" id="unlockAdmin" type="button">Unlock</button>
+          <p class="hint">Use the admin password configured on the server.</p>
+        </div>
+
+        <div class="admin-workspace" id="adminWorkspace" hidden>
+          <form class="player-form" id="playerForm">
+            <input id="playerId" type="hidden">
+            <label>
+              <span>Player name</span>
+              <input id="playerName" required maxlength="40" placeholder="Example: Sir Objective">
+            </label>
+            <label>
+              <span>Tier</span>
+              <select id="playerTier" required></select>
+            </label>
+            <label>
+              <span>Region</span>
+              <input id="playerRegion" maxlength="24" placeholder="NA East">
+            </label>
+            <label>
+              <span>Role</span>
+              <input id="playerRole" maxlength="28" placeholder="Frontline / Engineer">
+            </label>
+            <label>
+              <span>Clan or team</span>
+              <input id="playerClan" maxlength="28" placeholder="Optional">
+            </label>
+            <label class="player-form__wide">
+              <span>Notes</span>
+              <textarea id="playerNotes" rows="3" maxlength="180" placeholder="Short reason for placement"></textarea>
+            </label>
+            <div class="form-actions">
+              <button class="button" type="submit">Save Player</button>
+              <button class="button button--ghost" id="clearForm" type="button">Clear</button>
+            </div>
+          </form>
+
+          <div class="admin-list" id="adminList"></div>
+        </div>
+      </section>
+    </main>
+
+    <script src="admin.js"></script>
+  </body>
+</html>
