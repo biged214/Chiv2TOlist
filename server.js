@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
+import mysql from "mysql2/promise";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,6 +14,7 @@ const sessionSecret = process.env.SESSION_SECRET || "change-this-session-secret"
 const cookieName = "chiv2_admin";
 const dataDir = path.join(__dirname, "data");
 const playersFile = path.join(dataDir, "players.json");
+const hasDatabase = Boolean(process.env.DB_HOST && process.env.DB_NAME && process.env.DB_USER);
 
 const tiers = [
   { id: "s", label: "S", name: "", color: "#7f1d1d" },
@@ -122,12 +124,18 @@ function normalizePlayer(input, fallback = {}) {
     region: String(input.region || fallback.region || "").trim().slice(0, 24),
     role: String(input.role || fallback.role || "").trim().slice(0, 28),
     clan: String(input.clan || fallback.clan || "").trim().slice(0, 28),
+    playfabId: String(input.playfabId || input.playfab_id || fallback.playfabId || "").trim().slice(0, 64),
     notes: String(input.notes || fallback.notes || "").trim().slice(0, 180),
     order: Number.isFinite(Number(input.order)) ? Number(input.order) : fallback.order || 1
   };
 }
 
 async function readPlayers() {
+  if (hasDatabase) return readPlayersFromDatabase();
+  return readPlayersFromFile();
+}
+
+async function readPlayersFromFile() {
   try {
     const raw = await fs.readFile(playersFile, "utf8");
     const parsed = JSON.parse(raw);
@@ -140,8 +148,111 @@ async function readPlayers() {
 }
 
 async function writePlayers(players) {
+  if (hasDatabase) {
+    await writePlayersToDatabase(players);
+    return;
+  }
+
   await fs.mkdir(dataDir, { recursive: true });
   await fs.writeFile(playersFile, `${JSON.stringify(players.sort(byOrder), null, 2)}\n`);
+}
+
+function databaseConfig() {
+  return {
+    host: process.env.DB_HOST,
+    port: Number(process.env.DB_PORT || "3306"),
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME
+  };
+}
+
+async function withDatabase(callback) {
+  const connection = await mysql.createConnection(databaseConfig());
+  try {
+    await ensurePlayersTable(connection);
+    return await callback(connection);
+  } finally {
+    await connection.end();
+  }
+}
+
+async function ensurePlayersTable(connection) {
+  await connection.execute(`
+    CREATE TABLE IF NOT EXISTS players (
+      id VARCHAR(80) PRIMARY KEY,
+      name VARCHAR(40) NOT NULL,
+      tier VARCHAR(20) NOT NULL,
+      region VARCHAR(24) DEFAULT '',
+      role VARCHAR(28) DEFAULT '',
+      clan VARCHAR(28) DEFAULT '',
+      playfab_id VARCHAR(64) DEFAULT '',
+      notes VARCHAR(180) DEFAULT '',
+      sort_order INT NOT NULL DEFAULT 1,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
+  const [columns] = await connection.execute("SHOW COLUMNS FROM players LIKE 'playfab_id'");
+  if (!columns.length) {
+    await connection.execute("ALTER TABLE players ADD COLUMN playfab_id VARCHAR(64) DEFAULT '' AFTER clan");
+  }
+}
+
+function rowToPlayer(row) {
+  return normalizePlayer({
+    id: row.id,
+    name: row.name,
+    tier: row.tier,
+    region: row.region,
+    role: row.role,
+    clan: row.clan,
+    playfabId: row.playfab_id,
+    notes: row.notes,
+    order: row.sort_order
+  });
+}
+
+async function readPlayersFromDatabase() {
+  return withDatabase(async (connection) => {
+    const [rows] = await connection.execute("SELECT * FROM players ORDER BY sort_order ASC, name ASC");
+    if (rows.length) return rows.map(rowToPlayer);
+
+    const seededPlayers = await readPlayersFromFile();
+    await writePlayersToDatabase(seededPlayers);
+    return seededPlayers;
+  });
+}
+
+async function writePlayersToDatabase(players) {
+  return withDatabase(async (connection) => {
+    const sortedPlayers = players.map((player) => normalizePlayer(player)).sort(byOrder);
+    await connection.beginTransaction();
+    try {
+      await connection.execute("DELETE FROM players");
+      for (const player of sortedPlayers) {
+        await connection.execute(
+          `INSERT INTO players (id, name, tier, region, role, clan, playfab_id, notes, sort_order)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            player.id,
+            player.name,
+            player.tier,
+            player.region,
+            player.role,
+            player.clan,
+            player.playfabId,
+            player.notes,
+            player.order
+          ]
+        );
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    }
+  });
 }
 
 function byOrder(a, b) {
