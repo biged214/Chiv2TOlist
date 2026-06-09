@@ -38,6 +38,18 @@ For `www.chivalrytierlist.com`, add:
 
 DNS updates can take a while. GitHub says they can take up to 24 hours.
 
+## GoDaddy Build Settings
+
+If GoDaddy asks for build settings, use:
+
+| Setting | Value |
+| --- | --- |
+| Install command | `npm install` |
+| Build command | `npm run build` |
+| Output directory | `dist` |
+
+The build tools are listed under `dependencies` in `package.json` because some hosting integrations do not install `devDependencies` during production builds.
+
 ## What To Do Before Sharing
 
 1. Replace the demo players with your real first list.
