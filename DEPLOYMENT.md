@@ -19,6 +19,12 @@ The build command only prints a message because this site does not need a bundle
 
 ## Admin Login
 
+The public page no longer links to admin controls.
+
+Use this private admin URL after deployment:
+
+`https://chivalrytierlist.com/admin`
+
 Set these environment variables in GoDaddy if the dashboard gives you an environment variable section:
 
 | Variable | Purpose |
