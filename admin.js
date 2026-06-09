@@ -96,26 +96,35 @@ async function refreshPlayers() {
 
 async function savePlayer(event) {
   event.preventDefault();
+  const playfabValue = playerPlayfabId.value.trim();
   const body = {
     name: playerName.value.trim(),
     tier: playerTier.value,
     region: playerRegion.value.trim(),
     role: playerRole.value.trim(),
     clan: playerClan.value.trim(),
-    playfabId: playerPlayfabId.value.trim(),
+    playfabId: playfabValue,
+    playfab_id: playfabValue,
+    playerfabId: playfabValue,
+    playerfab_id: playfabValue,
     notes: playerNotes.value.trim()
   };
 
+  let savedPlayer;
   if (playerId.value) {
-    await api(`/api/players/${encodeURIComponent(playerId.value)}`, {
+    savedPlayer = await api(`/api/players/${encodeURIComponent(playerId.value)}`, {
       method: "PUT",
       body: JSON.stringify(body)
     });
   } else {
-    await api("/api/players", {
+    savedPlayer = await api("/api/players", {
       method: "POST",
       body: JSON.stringify(body)
     });
+  }
+
+  if (playfabValue && savedPlayer.playfabId !== playfabValue) {
+    throw new Error("PlayFab ID did not save. Please refresh the admin page and try again.");
   }
 
   clearForm();
