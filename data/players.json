@@ -1,0 +1,42 @@
+[
+  {
+    "id": "demo-sir-objective",
+    "name": "Sir Objective",
+    "tier": "s",
+    "region": "NA East",
+    "role": "Frontline",
+    "clan": "Free Agent",
+    "notes": "Always on carts, gates, banners, and overtime fights.",
+    "order": 1
+  },
+  {
+    "id": "demo-banner-breaker",
+    "name": "Banner Breaker",
+    "tier": "a",
+    "region": "EU",
+    "role": "Knight",
+    "clan": "Mason",
+    "notes": "Strong anchor player with consistent pressure on final objectives.",
+    "order": 2
+  },
+  {
+    "id": "demo-supply-crate",
+    "name": "Supply Crate",
+    "tier": "b",
+    "region": "NA Central",
+    "role": "Engineer",
+    "clan": "Agatha",
+    "notes": "Builds, repairs, and plays the boring jobs that win maps.",
+    "order": 3
+  },
+  {
+    "id": "demo-ladder-lord",
+    "name": "Ladder Lord",
+    "tier": "watch",
+    "region": "OCE",
+    "role": "Vanguard",
+    "clan": "",
+    "notes": "Explosive pushes, needs more matches against top groups.",
+    "order": 4
+  }
+]
