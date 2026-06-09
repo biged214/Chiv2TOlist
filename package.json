@@ -9,7 +9,7 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
+    "@vitejs/plugin-react": "4.3.4",
     "autoprefixer": "latest",
     "express": "latest",
     "postcss": "latest",
@@ -17,7 +17,7 @@
     "tailwindcss-animate": "latest",
     "tsx": "latest",
     "typescript": "latest",
-    "vite": "latest"
+    "vite": "5.4.19"
   },
   "devDependencies": {}
 }
