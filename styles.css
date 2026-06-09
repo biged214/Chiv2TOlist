@@ -264,6 +264,21 @@ textarea {
   line-height: 1.5;
 }
 
+.stats-link {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-top: 12px;
+  color: var(--accent);
+  font-size: 0.9rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.stats-link:hover {
+  text-decoration: underline;
+}
+
 .empty-state {
   display: grid;
   place-items: center;
