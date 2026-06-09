@@ -50,7 +50,9 @@ function getFilters() {
 function visiblePlayers() {
   const filters = getFilters();
   return players.filter((player) => {
-    const searchable = [player.name, player.region, player.role, player.clan, player.notes].join(" ").toLowerCase();
+    const searchable = [player.name, player.region, player.role, player.clan, player.playfabId, player.notes]
+      .join(" ")
+      .toLowerCase();
     const matchesTier = filters.tier === "all" || player.tier === filters.tier;
     const matchesRegion = filters.region === "all" || player.region === filters.region;
     const matchesSearch = !filters.search || searchable.includes(filters.search);
@@ -127,6 +129,17 @@ function renderPlayerCard(player) {
   });
 
   card.querySelector("p").textContent = player.notes || "No notes yet.";
+
+  if (player.playfabId) {
+    const statsLink = document.createElement("a");
+    statsLink.className = "stats-link";
+    statsLink.href = `https://chivalry2stats.com/player?id=${encodeURIComponent(player.playfabId)}`;
+    statsLink.target = "_blank";
+    statsLink.rel = "noopener noreferrer";
+    statsLink.textContent = "View Chivalry2Stats record";
+    card.append(statsLink);
+  }
+
   return card;
 }
 
