@@ -11,10 +11,6 @@
       <div class="hero__shade"></div>
       <nav class="topbar" aria-label="Main navigation">
         <a class="brand" href="#tier-list">TO Tier List</a>
-        <div class="topbar__actions">
-          <button class="icon-button" id="resetDemo" type="button" title="Reset demo data" aria-label="Reset demo data">↺</button>
-          <a class="button button--ghost" href="#admin">Admin</a>
-        </div>
       </nav>
       <section class="hero__content">
         <p class="eyebrow">Chivalry 2 Team Objective Rankings</p>
@@ -44,61 +40,6 @@
       </section>
 
       <section class="tier-board" id="tier-list" aria-live="polite"></section>
-
-      <section class="admin-panel" id="admin">
-        <div class="admin-panel__head">
-          <div>
-            <p class="eyebrow">Admin Control</p>
-            <h2>Manage the list</h2>
-          </div>
-          <button class="button button--dark" id="exportData" type="button">Export Data</button>
-        </div>
-
-        <div class="admin-lock" id="adminLock">
-          <label>
-            <span>Admin password</span>
-            <input id="adminCode" type="password" placeholder="Enter admin password">
-          </label>
-          <button class="button" id="unlockAdmin" type="button">Unlock</button>
-          <p class="hint">Use the admin password configured on the server.</p>
-        </div>
-
-        <div class="admin-workspace" id="adminWorkspace" hidden>
-          <form class="player-form" id="playerForm">
-            <input id="playerId" type="hidden">
-            <label>
-              <span>Player name</span>
-              <input id="playerName" required maxlength="40" placeholder="Example: Sir Objective">
-            </label>
-            <label>
-              <span>Tier</span>
-              <select id="playerTier" required></select>
-            </label>
-            <label>
-              <span>Region</span>
-              <input id="playerRegion" maxlength="24" placeholder="NA East">
-            </label>
-            <label>
-              <span>Role</span>
-              <input id="playerRole" maxlength="28" placeholder="Frontline / Engineer">
-            </label>
-            <label>
-              <span>Clan or team</span>
-              <input id="playerClan" maxlength="28" placeholder="Optional">
-            </label>
-            <label class="player-form__wide">
-              <span>Notes</span>
-              <textarea id="playerNotes" rows="3" maxlength="180" placeholder="Short reason for placement"></textarea>
-            </label>
-            <div class="form-actions">
-              <button class="button" type="submit">Save Player</button>
-              <button class="button button--ghost" id="clearForm" type="button">Clear</button>
-            </div>
-          </form>
-
-          <div class="admin-list" id="adminList"></div>
-        </div>
-      </section>
     </main>
 
     <template id="playerCardTemplate">
