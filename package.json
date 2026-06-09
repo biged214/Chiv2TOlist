@@ -1,0 +1,21 @@
+{
+  "name": "chiv2-to-tier-list",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "autoprefixer": "latest",
+    "postcss": "latest",
+    "tailwindcss": "latest",
+    "tailwindcss-animate": "latest",
+    "tsx": "latest",
+    "typescript": "latest",
+    "vite": "latest"
+  },
+  "devDependencies": {}
+}
