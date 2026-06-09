@@ -8,7 +8,7 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "latest"
-  },
-  "devDependencies": {}
+    "express": "latest",
+    "mysql2": "^3.22.5"
+  }
 }
