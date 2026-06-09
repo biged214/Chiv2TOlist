@@ -46,7 +46,10 @@ If GoDaddy asks for build settings, use:
 | --- | --- |
 | Install command | `npm install` |
 | Build command | `npm run build` |
-| Output directory | `dist` |
+| Start command | `npm start` |
+| Output directory | `dist/client` |
+
+The app includes a small Express server in `server.js`. It serves the files Vite builds into `dist/client`.
 
 The build tools are listed under `dependencies` in `package.json` because some hosting integrations do not install `devDependencies` during production builds.
 
