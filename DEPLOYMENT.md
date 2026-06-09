@@ -1,27 +1,40 @@
 # Getting The Site Live
 
-This first version is a static website. That means it can go live quickly, but admin edits are still saved only in the browser where you make them.
+This version is a small Express app that serves the tier list and stores player data on the server.
 
-For a public launch, use this version to show the tier list. For real admin control that updates the public site for everyone, the next build step is adding Supabase.
+Admin edits are no longer browser-local. They go through the server API and update `data/players.json` on the deployed app.
 
-## GitHub Pages With GoDaddy
+## GoDaddy Settings
+
+If GoDaddy asks for build settings, use:
+
+| Setting | Value |
+| --- | --- |
+| Install command | `npm install` |
+| Build command | `npm run build` |
+| Start command | `npm start` |
+| Output directory | leave blank |
+
+The build command only prints a message because this site does not need a bundler. GoDaddy starts the app with `server.js`.
+
+## Admin Login
+
+Set these environment variables in GoDaddy if the dashboard gives you an environment variable section:
+
+| Variable | Purpose |
+| --- | --- |
+| `ADMIN_PASSWORD` | The password used to unlock admin controls |
+| `SESSION_SECRET` | A long random phrase used to sign admin login cookies |
+
+If `ADMIN_PASSWORD` is not set, the temporary default is `mason-order`. Change it before sharing admin access.
+
+## GoDaddy Domain
 
 Your custom domain is:
 
 `chivalrytierlist.com`
 
-A `CNAME` file has already been added to this repository with that domain.
-
-In GitHub:
-
-1. Open `biged214/Chiv2TOlist`.
-2. Go to Settings.
-3. Go to Pages.
-4. Set the source to deploy from the `main` branch and root folder.
-5. Confirm the custom domain is `chivalrytierlist.com`.
-6. After DNS finishes updating, turn on Enforce HTTPS if GitHub allows it.
-
-In GoDaddy DNS, add these records for the root domain:
+In GoDaddy DNS, use these records for the root domain:
 
 | Type | Name | Value |
 | --- | --- | --- |
@@ -36,38 +49,10 @@ For `www.chivalrytierlist.com`, add:
 | --- | --- | --- |
 | CNAME | www | biged214.github.io |
 
-DNS updates can take a while. GitHub says they can take up to 24 hours.
+DNS updates can take a while.
 
-## GoDaddy Build Settings
+## Data Notes
 
-If GoDaddy asks for build settings, use:
+The current data file is `data/players.json`. Back it up occasionally using the admin panel's Export Data button.
 
-| Setting | Value |
-| --- | --- |
-| Install command | `npm install` |
-| Build command | `npm run build` |
-| Start command | `npm start` |
-| Output directory | `dist/client` |
-
-The app includes a small Express server in `server.js`. It serves the files Vite builds into `dist/client`.
-
-The build tools are listed under `dependencies` in `package.json` because some hosting integrations do not install `devDependencies` during production builds.
-
-## What To Do Before Sharing
-
-1. Replace the demo players with your real first list.
-2. Open the admin panel with `mason-order`.
-3. Make your edits.
-4. Use `Export Data` and save that data somewhere safe.
-5. Ask me to make that exported data the site's default public list before you upload.
-
-## Next Serious Upgrade
-
-The next version should use:
-
-- Supabase database
-- Real admin login
-- Public data that updates for everyone
-- Hosting on GitHub Pages, Vercel, or Netlify
-
-That is the point where this changes from a local editable prototype into a proper live admin-managed website.
+The next serious upgrade would be moving from this server-side JSON store to GoDaddy MySQL or Supabase so data is independent from deployments.
