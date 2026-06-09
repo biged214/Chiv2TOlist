@@ -5,11 +5,13 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "node server.js"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
     "autoprefixer": "latest",
+    "express": "latest",
     "postcss": "latest",
     "tailwindcss": "latest",
     "tailwindcss-animate": "latest",
