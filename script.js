@@ -1,4 +1,10 @@
-let tiers = [];
+let tiers = [
+  { id: "s", label: "S", name: "", color: "#7f1d1d" },
+  { id: "a", label: "A", name: "", color: "#9b5d1f" },
+  { id: "b", label: "B", name: "", color: "#50683e" },
+  { id: "c", label: "C", name: "", color: "#536673" },
+  { id: "watch", label: "D", name: "", color: "#4c3b62" }
+];
 let players = [];
 
 const tierBoard = document.querySelector("#tier-list");
@@ -19,6 +25,14 @@ async function api(path) {
   const response = await fetch(path, { credentials: "same-origin" });
   if (!response.ok) throw new Error("Could not load tier list.");
   return response.json();
+}
+
+async function loadPlayers() {
+  try {
+    return await api("/api/players");
+  } catch {
+    return api("/data/players.json");
+  }
 }
 
 function byOrder(a, b) {
@@ -126,9 +140,7 @@ function render() {
 });
 
 async function init() {
-  const [config, nextPlayers] = await Promise.all([api("/api/config"), api("/api/players")]);
-  tiers = config.tiers;
-  players = nextPlayers;
+  players = await loadPlayers();
   render();
 }
 
