@@ -285,6 +285,10 @@ app.post("/api/players/reset", requireAdmin, async (_request, response, next) =>
   }
 });
 
+app.get("/admin", (_request, response) => {
+  response.sendFile(path.join(__dirname, "admin.html"));
+});
+
 app.use((request, response) => {
   if (request.path.startsWith("/api/")) {
     response.status(404).json({ error: "Not found." });
