@@ -224,7 +224,7 @@ async function ensurePlayersTable(connection) {
     }
   }
 
-  if (columnNames.has("playfabId") && !columnNames.has("playfab_id")) {
+  if (columnNames.has("playfabId")) {
     await connection.execute("UPDATE `players` SET `playfab_id` = `playfabId` WHERE `playfab_id` = '' OR `playfab_id` IS NULL");
   }
 }
@@ -253,6 +253,48 @@ async function readPlayersFromDatabase() {
     const seededPlayers = await readPlayersFromFile();
     await writePlayersToDatabase(seededPlayers);
     return seededPlayers;
+  });
+}
+
+async function savePlayerToDatabase(player) {
+  return withDatabase(async (connection) => {
+    const normalized = normalizePlayer(player);
+    await connection.execute(
+      `INSERT INTO \`players\` (\`id\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`playfab_id\`, \`notes\`, \`sort_order\`)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         \`name\` = VALUES(\`name\`),
+         \`tier\` = VALUES(\`tier\`),
+         \`region\` = VALUES(\`region\`),
+         \`role\` = VALUES(\`role\`),
+         \`clan\` = VALUES(\`clan\`),
+         \`playfab_id\` = VALUES(\`playfab_id\`),
+         \`notes\` = VALUES(\`notes\`),
+         \`sort_order\` = VALUES(\`sort_order\`)`,
+      [
+        normalized.id,
+        normalized.name,
+        normalized.tier,
+        normalized.region,
+        normalized.role,
+        normalized.clan,
+        normalized.playfabId,
+        normalized.notes,
+        normalized.order
+      ]
+    );
+
+    const [rows] = await connection.execute(
+      "SELECT `id`, `name`, `tier`, `region`, `role`, `clan`, `playfab_id`, `notes`, `sort_order` FROM `players` WHERE `id` = ? LIMIT 1",
+      [normalized.id]
+    );
+    return rows.length ? rowToPlayer(rows[0]) : normalized;
+  });
+}
+
+async function deletePlayerFromDatabase(id) {
+  return withDatabase(async (connection) => {
+    await connection.execute("DELETE FROM `players` WHERE `id` = ?", [id]);
   });
 }
 
@@ -341,6 +383,11 @@ app.post("/api/players", requireAdmin, async (request, response, next) => {
       return;
     }
 
+    if (hasDatabase()) {
+      response.status(201).json(await savePlayerToDatabase(nextPlayer));
+      return;
+    }
+
     players.push(nextPlayer);
     await writePlayers(players);
     response.status(201).json(nextPlayer);
@@ -364,6 +411,11 @@ app.put("/api/players/:id", requireAdmin, async (request, response, next) => {
       return;
     }
 
+    if (hasDatabase()) {
+      response.json(await savePlayerToDatabase(updated));
+      return;
+    }
+
     const nextPlayers = players.map((player) => (player.id === existing.id ? updated : player));
     await writePlayers(nextPlayers);
     response.json(updated);
@@ -374,6 +426,12 @@ app.put("/api/players/:id", requireAdmin, async (request, response, next) => {
 
 app.delete("/api/players/:id", requireAdmin, async (request, response, next) => {
   try {
+    if (hasDatabase()) {
+      await deletePlayerFromDatabase(request.params.id);
+      response.json({ ok: true });
+      return;
+    }
+
     const players = await readPlayers();
     await writePlayers(players.filter((player) => player.id !== request.params.id));
     response.json({ ok: true });
