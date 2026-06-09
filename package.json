@@ -4,14 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "preview": "vite preview",
+    "build": "node -e \"console.log('No build step needed for static site')\"",
     "start": "node server.js"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "4.3.4",
-    "express": "latest",
-    "vite": "5.4.19"
+    "express": "latest"
   },
   "devDependencies": {}
 }
