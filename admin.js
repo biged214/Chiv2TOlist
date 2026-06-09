@@ -1,4 +1,10 @@
-let tiers = [];
+let tiers = [
+  { id: "s", label: "S", name: "", color: "#7f1d1d" },
+  { id: "a", label: "A", name: "", color: "#9b5d1f" },
+  { id: "b", label: "B", name: "", color: "#50683e" },
+  { id: "c", label: "C", name: "", color: "#536673" },
+  { id: "watch", label: "D", name: "", color: "#4c3b62" }
+];
 let players = [];
 let isAdmin = false;
 
@@ -193,19 +199,13 @@ document.querySelector("#exportData").addEventListener("click", async () => {
 });
 
 async function init() {
-  const [config, session, nextPlayers] = await Promise.all([
-    api("/api/config"),
-    api("/api/session"),
-    api("/api/players")
-  ]);
-  tiers = config.tiers;
-  isAdmin = session.isAdmin;
-  players = nextPlayers;
+  await api("/api/logout", { method: "POST" }).catch(() => null);
+  isAdmin = false;
+  players = await api("/api/players");
   populateTierSelect();
-  adminLock.hidden = isAdmin;
-  adminWorkspace.hidden = !isAdmin;
+  adminLock.hidden = false;
+  adminWorkspace.hidden = true;
   clearForm();
-  if (isAdmin) renderAdminList();
 }
 
 init().catch((error) => {
