@@ -1,71 +1,5 @@
-const storageKey = "chiv2-to-tier-list-v1";
-const adminCode = "mason-order";
-
-function makeId() {
-  return crypto.randomUUID ? crypto.randomUUID() : `player-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-const tiers = [
-  { id: "s", label: "S", name: "", color: "#7f1d1d" },
-  { id: "a", label: "A", name: "", color: "#9b5d1f" },
-  { id: "b", label: "B", name: "", color: "#50683e" },
-  { id: "c", label: "C", name: "", color: "#536673" },
-  { id: "watch", label: "D", name: "", color: "#4c3b62" }
-];
-
-const starterPlayers = [
-  {
-    id: makeId(),
-    name: "Sir Objective",
-    tier: "s",
-    region: "NA East",
-    role: "Frontline",
-    clan: "Free Agent",
-    notes: "Always on carts, gates, banners, and overtime fights.",
-    order: 1
-  },
-  {
-    id: makeId(),
-    name: "Banner Breaker",
-    tier: "a",
-    region: "EU",
-    role: "Knight",
-    clan: "Mason",
-    notes: "Strong anchor player with consistent pressure on final objectives.",
-    order: 2
-  },
-  {
-    id: makeId(),
-    name: "Supply Crate",
-    tier: "b",
-    region: "NA Central",
-    role: "Engineer",
-    clan: "Agatha",
-    notes: "Builds, repairs, and plays the boring jobs that win maps.",
-    order: 3
-  },
-  {
-    id: makeId(),
-    name: "Ladder Lord",
-    tier: "watch",
-    region: "OCE",
-    role: "Vanguard",
-    clan: "",
-    notes: "Explosive pushes, needs more matches against top groups.",
-    order: 4
-  }
-];
-
-let players = loadPlayers();
+let tiers = [];
+let players = [];
 let isAdmin = false;
 
 const tierBoard = document.querySelector("#tier-list");
@@ -84,13 +18,28 @@ const adminList = document.querySelector("#adminList");
 const adminWorkspace = document.querySelector("#adminWorkspace");
 const adminLock = document.querySelector("#adminLock");
 
-function loadPlayers() {
-  const saved = localStorage.getItem(storageKey);
-  return saved ? JSON.parse(saved) : starterPlayers;
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
-function savePlayers() {
-  localStorage.setItem(storageKey, JSON.stringify(players));
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...options
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: "Request failed." }));
+    throw new Error(error.error || "Request failed.");
+  }
+
+  return response.json();
 }
 
 function byOrder(a, b) {
@@ -117,15 +66,20 @@ function visiblePlayers() {
 }
 
 function populateControls() {
+  const selectedTier = tierFilter.value;
+  const selectedRegion = regionFilter.value;
+
   tierFilter.innerHTML = `<option value="all">All tiers</option>`;
   playerTier.innerHTML = "";
 
   tiers.forEach((tier) => {
-    tierFilter.append(new Option(`${tier.label} - ${tier.name}`, tier.id));
-    playerTier.append(new Option(`${tier.label} - ${tier.name}`, tier.id));
+    const label = tier.name ? `${tier.label} - ${tier.name}` : tier.label;
+    tierFilter.append(new Option(label, tier.id));
+    playerTier.append(new Option(label, tier.id));
   });
 
-  const selectedRegion = regionFilter.value;
+  tierFilter.value = tiers.some((tier) => tier.id === selectedTier) ? selectedTier : "all";
+
   const regions = [...new Set(players.map((player) => player.region).filter(Boolean))].sort();
   regionFilter.innerHTML = `<option value="all">All regions</option>`;
   regions.forEach((region) => regionFilter.append(new Option(region, region)));
@@ -145,7 +99,7 @@ function renderTierBoard() {
 
     const label = document.createElement("div");
     label.className = "tier-label";
-    label.innerHTML = `<div><strong>${tier.label}</strong><span>${tier.name}</span></div>`;
+    label.innerHTML = `<div><strong>${escapeHtml(tier.label)}</strong><span>${escapeHtml(tier.name)}</span></div>`;
 
     const group = document.createElement("div");
     group.className = "tier-players";
@@ -179,7 +133,7 @@ function renderPlayerCard(player) {
     ["Team", player.clan || "None"]
   ].forEach(([label, value]) => {
     const item = document.createElement("div");
-    item.innerHTML = `<dt>${label}</dt><dd>${value}</dd>`;
+    item.innerHTML = `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`;
     meta.append(item);
   });
 
@@ -196,11 +150,11 @@ function renderAdminList() {
     item.innerHTML = `
       <div>
         <strong>${escapeHtml(player.name)}</strong>
-        <span>${escapeHtml(tier?.label || player.tier)} tier · ${escapeHtml(player.region || "Unknown region")} · ${escapeHtml(player.role || "Flexible")}</span>
+        <span>${escapeHtml(tier?.label || player.tier)} tier - ${escapeHtml(player.region || "Unknown region")} - ${escapeHtml(player.role || "Flexible")}</span>
       </div>
       <div class="admin-actions">
-        <button class="mini-button" type="button" data-action="up" data-id="${player.id}" title="Move up">↑</button>
-        <button class="mini-button" type="button" data-action="down" data-id="${player.id}" title="Move down">↓</button>
+        <button class="mini-button" type="button" data-action="up" data-id="${player.id}" title="Move up">Up</button>
+        <button class="mini-button" type="button" data-action="down" data-id="${player.id}" title="Move down">Down</button>
         <button class="mini-button" type="button" data-action="edit" data-id="${player.id}">Edit</button>
         <button class="mini-button" type="button" data-action="delete" data-id="${player.id}">Delete</button>
       </div>
@@ -220,45 +174,43 @@ function render() {
 function clearForm() {
   playerForm.reset();
   playerId.value = "";
-  playerTier.value = "b";
+  playerTier.value = tiers[2]?.id || tiers[0]?.id || "b";
 }
 
-function reorderPlayer(id, direction) {
-  const sorted = players.slice().sort(byOrder);
-  const currentIndex = sorted.findIndex((player) => player.id === id);
-  const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
-  if (targetIndex < 0 || targetIndex >= sorted.length) return;
-
-  const current = sorted[currentIndex];
-  const target = sorted[targetIndex];
-  [current.order, target.order] = [target.order, current.order];
-  savePlayers();
+async function refreshPlayers() {
+  players = await api("/api/players");
   render();
 }
 
-playerForm.addEventListener("submit", (event) => {
+async function savePlayer(event) {
   event.preventDefault();
-  const existing = players.find((player) => player.id === playerId.value);
-  const nextPlayer = {
-    id: existing?.id || makeId(),
+  const body = {
     name: playerName.value.trim(),
     tier: playerTier.value,
     region: playerRegion.value.trim(),
     role: playerRole.value.trim(),
     clan: playerClan.value.trim(),
-    notes: playerNotes.value.trim(),
-    order: existing?.order || players.length + 1
+    notes: playerNotes.value.trim()
   };
 
-  if (existing) {
-    players = players.map((player) => (player.id === existing.id ? nextPlayer : player));
+  if (playerId.value) {
+    await api(`/api/players/${encodeURIComponent(playerId.value)}`, {
+      method: "PUT",
+      body: JSON.stringify(body)
+    });
   } else {
-    players.push(nextPlayer);
+    await api("/api/players", {
+      method: "POST",
+      body: JSON.stringify(body)
+    });
   }
 
-  savePlayers();
   clearForm();
-  render();
+  await refreshPlayers();
+}
+
+playerForm.addEventListener("submit", (event) => {
+  savePlayer(event).catch((error) => alert(error.message));
 });
 
 adminList.addEventListener("click", (event) => {
@@ -279,37 +231,49 @@ adminList.addEventListener("click", (event) => {
   }
 
   if (action === "delete" && player && confirm(`Delete ${player.name}?`)) {
-    players = players.filter((item) => item.id !== id);
-    savePlayers();
-    clearForm();
-    render();
+    api(`/api/players/${encodeURIComponent(id)}`, { method: "DELETE" })
+      .then(refreshPlayers)
+      .catch((error) => alert(error.message));
   }
 
   if (action === "up" || action === "down") {
-    reorderPlayer(id, action);
+    api("/api/players/reorder", {
+      method: "POST",
+      body: JSON.stringify({ id, direction: action })
+    })
+      .then((nextPlayers) => {
+        players = nextPlayers;
+        render();
+      })
+      .catch((error) => alert(error.message));
   }
 });
 
-document.querySelector("#unlockAdmin").addEventListener("click", () => {
-  const code = document.querySelector("#adminCode").value;
-  if (code !== adminCode) {
-    alert("Wrong admin code.");
-    return;
+document.querySelector("#unlockAdmin").addEventListener("click", async () => {
+  try {
+    await api("/api/login", {
+      method: "POST",
+      body: JSON.stringify({ password: document.querySelector("#adminCode").value })
+    });
+    isAdmin = true;
+    adminLock.hidden = true;
+    adminWorkspace.hidden = false;
+    render();
+  } catch (error) {
+    alert(error.message);
   }
-
-  isAdmin = true;
-  adminLock.hidden = true;
-  adminWorkspace.hidden = false;
-  render();
 });
 
 document.querySelector("#clearForm").addEventListener("click", clearForm);
 
-document.querySelector("#resetDemo").addEventListener("click", () => {
+document.querySelector("#resetDemo").addEventListener("click", async () => {
+  if (!isAdmin) {
+    alert("Unlock admin controls first.");
+    return;
+  }
+
   if (!confirm("Reset the tier list back to the demo players?")) return;
-  players = starterPlayers.map((player, index) => ({ ...player, id: makeId(), order: index + 1 }));
-  savePlayers();
-  clearForm();
+  players = await api("/api/players/reset", { method: "POST" });
   render();
 });
 
@@ -327,5 +291,21 @@ document.querySelector("#exportData").addEventListener("click", async () => {
   control.addEventListener("input", renderTierBoard);
 });
 
-clearForm();
-render();
+async function init() {
+  const [config, session, nextPlayers] = await Promise.all([
+    api("/api/config"),
+    api("/api/session"),
+    api("/api/players")
+  ]);
+  tiers = config.tiers;
+  isAdmin = session.isAdmin;
+  players = nextPlayers;
+  adminLock.hidden = isAdmin;
+  adminWorkspace.hidden = !isAdmin;
+  clearForm();
+  render();
+}
+
+init().catch((error) => {
+  tierBoard.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+});
