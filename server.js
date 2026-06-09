@@ -284,11 +284,22 @@ async function savePlayerToDatabase(player) {
       ]
     );
 
+    await connection.execute("UPDATE `players` SET `playfab_id` = ? WHERE `id` = ?", [
+      normalized.playfabId,
+      normalized.id
+    ]);
+
     const [rows] = await connection.execute(
       "SELECT `id`, `name`, `tier`, `region`, `role`, `clan`, `playfab_id`, `notes`, `sort_order` FROM `players` WHERE `id` = ? LIMIT 1",
       [normalized.id]
     );
-    return rows.length ? rowToPlayer(rows[0]) : normalized;
+    const saved = rows.length ? rowToPlayer(rows[0]) : normalized;
+
+    if (saved.playfabId !== normalized.playfabId) {
+      throw new Error("PlayFab ID did not save to the database.");
+    }
+
+    return saved;
   });
 }
 
