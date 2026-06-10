@@ -6,6 +6,7 @@
   --line: #d9c9b2;
   --red: #8c2f2b;
   --gold: #c8953e;
+  --accent: #8c2f2b;
   --steel: #536673;
   --green: #50683e;
   --dark: #171515;
@@ -38,7 +39,7 @@ textarea {
   position: relative;
   min-height: 74vh;
   color: #fff7e7;
-  background-image: url("assets/chivalry-banner.svg");
+  background-image: url("assets/chivalry-hero-realistic.png");
   background-position: center;
   background-size: cover;
   overflow: hidden;
@@ -162,6 +163,53 @@ textarea {
 .tier-board {
   display: grid;
   gap: 14px;
+}
+
+.submission-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.75fr) minmax(0, 1.25fr);
+  gap: 22px;
+  margin-top: 28px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.submission-panel h2 {
+  margin: 0;
+  font-size: 1.9rem;
+}
+
+.submission-panel p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.submission-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.submission-form__wide,
+.submission-form__actions {
+  grid-column: 1 / -1;
+}
+
+.submission-form__actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.form-status {
+  min-height: 24px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  font-weight: 700;
 }
 
 .tier-row {
@@ -348,7 +396,26 @@ textarea {
   margin-top: 18px;
 }
 
-.admin-item {
+.review-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 22px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.review-panel h2 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.submission-list {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-item,
+.submission-item {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 12px;
@@ -359,13 +426,22 @@ textarea {
   background: #fffdf8;
 }
 
-.admin-item strong {
+.admin-item strong,
+.submission-item strong {
   display: block;
 }
 
-.admin-item span {
+.admin-item span,
+.submission-item span {
   color: var(--muted);
   font-size: 0.88rem;
+}
+
+.submission-item p {
+  margin: 8px 0 0;
+  color: #39332e;
+  font-size: 0.9rem;
+  line-height: 1.45;
 }
 
 .admin-actions {
@@ -423,6 +499,12 @@ textarea {
   cursor: pointer;
 }
 
+.mini-button--approve {
+  color: #fff7e7;
+  border-color: rgba(0, 0, 0, 0.08);
+  background: var(--green);
+}
+
 @media (max-width: 760px) {
   .hero {
     min-height: 72vh;
@@ -441,10 +523,13 @@ textarea {
   }
 
   .toolbar,
+  .submission-panel,
+  .submission-form,
   .tier-row,
   .admin-lock,
   .player-form,
-  .admin-item {
+  .admin-item,
+  .submission-item {
     grid-template-columns: 1fr;
   }
 
@@ -457,6 +542,7 @@ textarea {
   }
 
   .admin-panel__head,
+  .submission-form__actions,
   .form-actions {
     align-items: stretch;
     flex-direction: column;
