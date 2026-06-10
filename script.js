@@ -6,8 +6,27 @@ let tiers = [
   { id: "watch", label: "D", name: "", color: "#4c3b62" }
 ];
 let players = [];
+let regions = [];
+const pages = {
+  team_objective: {
+    path: "/",
+    eyebrow: "Chivalry 2 Team Objective Rankings",
+    title: "Community Player Tiers for TO Mains.",
+    copy: "Track standout players, grouped by tier, and notes on region, role, strengths, and current form."
+  },
+  ranked_duelist: {
+    path: "/ranked-duelists",
+    eyebrow: "Chivalry 2 Ranked Duelist Rankings",
+    title: "Community Player Tiers for Ranked Duelists.",
+    copy: "Track standout duelists, grouped by tier, with region, role, stats links, and current form."
+  }
+};
+const listType = window.location.pathname.startsWith("/ranked-duelists") ? "ranked_duelist" : "team_objective";
 
 const tierBoard = document.querySelector("#tier-list");
+const pageEyebrow = document.querySelector("#pageEyebrow");
+const pageTitle = document.querySelector("#pageTitle");
+const pageCopy = document.querySelector("#pageCopy");
 const tierFilter = document.querySelector("#tierFilter");
 const regionFilter = document.querySelector("#regionFilter");
 const searchInput = document.querySelector("#searchInput");
@@ -47,7 +66,7 @@ async function api(path, options = {}) {
 
 async function loadPlayers() {
   try {
-    return await api("/api/players");
+    return await api(`/api/players?listType=${encodeURIComponent(listType)}`);
   } catch {
     return api("/data/players.json");
   }
@@ -82,6 +101,7 @@ function populateControls() {
   const selectedTier = tierFilter.value;
   const selectedRegion = regionFilter.value;
   const selectedSubmissionTier = submissionTier.value;
+  const selectedSubmissionRegion = submissionRegion.value;
 
   tierFilter.innerHTML = `<option value="all">All tiers</option>`;
   submissionTier.innerHTML = "";
@@ -93,10 +113,13 @@ function populateControls() {
   tierFilter.value = tiers.some((tier) => tier.id === selectedTier) ? selectedTier : "all";
   submissionTier.value = tiers.some((tier) => tier.id === selectedSubmissionTier) ? selectedSubmissionTier : tiers[2]?.id || "b";
 
-  const regions = [...new Set(players.map((player) => player.region).filter(Boolean))].sort();
   regionFilter.innerHTML = `<option value="all">All regions</option>`;
   regions.forEach((region) => regionFilter.append(new Option(region, region)));
   regionFilter.value = regions.includes(selectedRegion) ? selectedRegion : "all";
+
+  submissionRegion.innerHTML = `<option value="">Select region</option>`;
+  regions.forEach((region) => submissionRegion.append(new Option(region, region)));
+  submissionRegion.value = regions.includes(selectedSubmissionRegion) ? selectedSubmissionRegion : "";
 }
 
 function renderTierBoard() {
@@ -136,6 +159,8 @@ function renderPlayerCard(player) {
   const template = document.querySelector("#playerCardTemplate");
   const card = template.content.firstElementChild.cloneNode(true);
   const tier = tiers.find((item) => item.id === player.tier);
+  const toggle = card.querySelector(".player-card__toggle");
+  const details = card.querySelector(".player-card__details");
   card.querySelector("h3").textContent = player.name;
   card.querySelector(".badge").textContent = tier ? tier.label : player.tier;
 
@@ -159,8 +184,14 @@ function renderPlayerCard(player) {
     statsLink.target = "_blank";
     statsLink.rel = "noopener noreferrer";
     statsLink.textContent = "View Chivalry2Stats record";
-    card.append(statsLink);
+    details.append(statsLink);
   }
+
+  toggle.addEventListener("click", () => {
+    const isExpanded = toggle.getAttribute("aria-expanded") === "true";
+    toggle.setAttribute("aria-expanded", String(!isExpanded));
+    details.hidden = isExpanded;
+  });
 
   return card;
 }
@@ -208,6 +239,7 @@ submissionForm.addEventListener("submit", async (event) => {
     await api("/api/submissions", {
       method: "POST",
       body: JSON.stringify({
+        listType,
         name: submissionName.value.trim(),
         playfabId: submissionPlayfabId.value.trim(),
         playfab_id: submissionPlayfabId.value.trim(),
@@ -228,6 +260,13 @@ submissionForm.addEventListener("submit", async (event) => {
 });
 
 async function init() {
+  const page = pages[listType];
+  pageEyebrow.textContent = page.eyebrow;
+  pageTitle.textContent = page.title;
+  pageCopy.textContent = page.copy;
+  const config = await api("/api/config");
+  tiers = config.tiers || tiers;
+  regions = await api("/api/regions");
   players = await loadPlayers();
   render();
 }
