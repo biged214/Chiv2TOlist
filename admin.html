@@ -45,6 +45,21 @@
         </div>
 
         <div class="admin-workspace" id="adminWorkspace" hidden>
+          <section class="admin-tools" aria-label="List and region controls">
+            <label>
+              <span>Managing list</span>
+              <select id="adminListType"></select>
+            </label>
+            <form class="region-form" id="regionForm">
+              <label>
+                <span>Add region</span>
+                <input id="newRegion" maxlength="24" placeholder="NA East">
+              </label>
+              <button class="button" type="submit">Add Region</button>
+            </form>
+            <div class="region-list" id="regionList"></div>
+          </section>
+
           <form class="player-form" id="playerForm">
             <input id="playerId" type="hidden">
             <label>
@@ -57,7 +72,7 @@
             </label>
             <label>
               <span>Region</span>
-              <input id="playerRegion" maxlength="24" placeholder="NA East">
+              <select id="playerRegion" required></select>
             </label>
             <label>
               <span>Role</span>
@@ -94,6 +109,6 @@
       </section>
     </main>
 
-    <script src="admin.js?v=submissions-20260609"></script>
+    <script src="admin.js?v=multi-list-regions-20260609"></script>
   </body>
 </html>
