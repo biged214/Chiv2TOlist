@@ -1,4 +1,5 @@
 let tiers = [
+  { id: "creator", label: "Creator", name: "", color: "#2f1f4f" },
   { id: "s", label: "S", name: "", color: "#7f1d1d" },
   { id: "a", label: "A", name: "", color: "#9b5d1f" },
   { id: "b", label: "B", name: "", color: "#50683e" },
@@ -24,6 +25,7 @@ const playerRegion = document.querySelector("#playerRegion");
 const playerRole = document.querySelector("#playerRole");
 const playerClan = document.querySelector("#playerClan");
 const playerPlayfabId = document.querySelector("#playerPlayfabId");
+const playerDiscordUsername = document.querySelector("#playerDiscordUsername");
 const playerNotes = document.querySelector("#playerNotes");
 const adminList = document.querySelector("#adminList");
 const submissionList = document.querySelector("#submissionList");
@@ -115,6 +117,7 @@ function renderAdminList() {
       <div>
         <strong>${escapeHtml(player.name)}</strong>
         <span>${escapeHtml(tier?.label || player.tier)} tier - ${escapeHtml(player.region || "Unknown region")} - ${escapeHtml(player.role || "Flexible")}${player.playfabId ? " - Stats linked" : ""}</span>
+        <span>Discord: ${escapeHtml(player.discordUsername || "Not provided")}</span>
       </div>
       <div class="admin-actions">
         <button class="mini-button" type="button" data-action="up" data-id="${player.id}" title="Move up">Up</button>
@@ -149,6 +152,7 @@ function renderSubmissions() {
       <div>
         <strong>${escapeHtml(submission.name)}</strong>
         <span>${isUpdateRequest ? "Update request" : "New submission"} - ${escapeHtml(tier?.label || submission.tier)} tier - ${escapeHtml(submission.region || "Unknown region")} - ${escapeHtml(submission.role || "Flexible")}${submission.playfabId ? " - PlayFab included" : ""}</span>
+        <span>Discord: ${escapeHtml(submission.discordUsername || "Not provided")}</span>
         <p>${escapeHtml(submission.notes || "No notes included.")}</p>
       </div>
       <div class="admin-actions">
@@ -190,6 +194,8 @@ async function savePlayer(event) {
     playfab_id: playfabValue,
     playerfabId: playfabValue,
     playerfab_id: playfabValue,
+    discordUsername: playerDiscordUsername.value.trim(),
+    discord_username: playerDiscordUsername.value.trim(),
     notes: playerNotes.value.trim()
   };
 
@@ -232,6 +238,7 @@ adminList.addEventListener("click", (event) => {
     playerRole.value = player.role;
     playerClan.value = player.clan;
     playerPlayfabId.value = player.playfabId || "";
+    playerDiscordUsername.value = player.discordUsername || "";
     playerNotes.value = player.notes;
     playerName.focus();
   }
