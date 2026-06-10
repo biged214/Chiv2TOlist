@@ -295,6 +295,11 @@ textarea {
   line-height: 1;
 }
 
+.tier-row:first-child .tier-label strong,
+.tier-row[data-tier-id="creator"] .tier-label strong {
+  font-size: 1.25rem;
+}
+
 .tier-label span {
   margin-top: 5px;
   color: rgba(255, 247, 231, 0.86);
