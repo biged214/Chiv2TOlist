@@ -5,11 +5,18 @@ let tiers = [
   { id: "c", label: "C", name: "", color: "#536673" },
   { id: "watch", label: "D", name: "", color: "#4c3b62" }
 ];
+let listTypes = [
+  { id: "team_objective", label: "Team Objective", path: "/" },
+  { id: "ranked_duelist", label: "Ranked Duelists", path: "/ranked-duelists" }
+];
 let players = [];
 let submissions = [];
+let regions = [];
+let currentListType = "team_objective";
 let isAdmin = false;
 
 const playerForm = document.querySelector("#playerForm");
+const adminListType = document.querySelector("#adminListType");
 const playerId = document.querySelector("#playerId");
 const playerName = document.querySelector("#playerName");
 const playerTier = document.querySelector("#playerTier");
@@ -20,6 +27,9 @@ const playerPlayfabId = document.querySelector("#playerPlayfabId");
 const playerNotes = document.querySelector("#playerNotes");
 const adminList = document.querySelector("#adminList");
 const submissionList = document.querySelector("#submissionList");
+const regionForm = document.querySelector("#regionForm");
+const newRegion = document.querySelector("#newRegion");
+const regionList = document.querySelector("#regionList");
 const adminWorkspace = document.querySelector("#adminWorkspace");
 const adminLock = document.querySelector("#adminLock");
 
@@ -59,6 +69,40 @@ function populateTierSelect() {
     playerTier.append(new Option(label, tier.id));
   });
   playerTier.value = tiers.some((tier) => tier.id === selectedTier) ? selectedTier : tiers[2]?.id || "b";
+}
+
+function populateListTypeSelect() {
+  const selected = adminListType.value || currentListType;
+  adminListType.innerHTML = "";
+  listTypes.forEach((listType) => adminListType.append(new Option(listType.label, listType.id)));
+  adminListType.value = listTypes.some((item) => item.id === selected) ? selected : "team_objective";
+  currentListType = adminListType.value;
+}
+
+function populateRegionSelect() {
+  const selectedRegion = playerRegion.value;
+  playerRegion.innerHTML = `<option value="">Select region</option>`;
+  regions.forEach((region) => playerRegion.append(new Option(region, region)));
+  playerRegion.value = regions.includes(selectedRegion) ? selectedRegion : "";
+}
+
+function renderRegions() {
+  regionList.innerHTML = "";
+  regions.forEach((region) => {
+    const item = document.createElement("span");
+    item.className = "region-chip";
+    item.innerHTML = `
+      ${escapeHtml(region)}
+      <button type="button" data-region="${escapeHtml(region)}" aria-label="Remove ${escapeHtml(region)}">&times;</button>
+    `;
+    regionList.append(item);
+  });
+}
+
+async function refreshRegions() {
+  regions = await api("/api/regions");
+  populateRegionSelect();
+  renderRegions();
 }
 
 function renderAdminList() {
@@ -122,12 +166,12 @@ function clearForm() {
 }
 
 async function refreshPlayers() {
-  players = await api("/api/players");
+  players = await api(`/api/players?listType=${encodeURIComponent(currentListType)}`);
   renderAdminList();
 }
 
 async function refreshSubmissions() {
-  submissions = await api("/api/submissions");
+  submissions = await api(`/api/submissions?listType=${encodeURIComponent(currentListType)}`);
   renderSubmissions();
 }
 
@@ -135,6 +179,7 @@ async function savePlayer(event) {
   event.preventDefault();
   const playfabValue = playerPlayfabId.value.trim();
   const body = {
+    listType: currentListType,
     name: playerName.value.trim(),
     tier: playerTier.value,
     region: playerRegion.value.trim(),
@@ -149,7 +194,7 @@ async function savePlayer(event) {
 
   let savedPlayer;
   if (playerId.value) {
-    savedPlayer = await api(`/api/players/${encodeURIComponent(playerId.value)}`, {
+    savedPlayer = await api(`/api/players/${encodeURIComponent(playerId.value)}?listType=${encodeURIComponent(currentListType)}`, {
       method: "PUT",
       body: JSON.stringify(body)
     });
@@ -191,7 +236,7 @@ adminList.addEventListener("click", (event) => {
   }
 
   if (action === "delete" && player && confirm(`Delete ${player.name}?`)) {
-    api(`/api/players/${encodeURIComponent(id)}`, { method: "DELETE" })
+    api(`/api/players/${encodeURIComponent(id)}?listType=${encodeURIComponent(currentListType)}`, { method: "DELETE" })
       .then(refreshPlayers)
       .catch((error) => alert(error.message));
   }
@@ -199,7 +244,7 @@ adminList.addEventListener("click", (event) => {
   if (action === "up" || action === "down") {
     api("/api/players/reorder", {
       method: "POST",
-      body: JSON.stringify({ id, direction: action })
+      body: JSON.stringify({ id, direction: action, listType: currentListType })
     })
       .then((nextPlayers) => {
         players = nextPlayers;
@@ -218,7 +263,7 @@ submissionList.addEventListener("click", (event) => {
   if (!submission) return;
 
   if (submissionAction === "approve") {
-    api(`/api/submissions/${encodeURIComponent(id)}/approve`, { method: "POST" })
+    api(`/api/submissions/${encodeURIComponent(id)}/approve?listType=${encodeURIComponent(currentListType)}`, { method: "POST" })
       .then(async () => {
         await refreshPlayers();
         await refreshSubmissions();
@@ -227,10 +272,38 @@ submissionList.addEventListener("click", (event) => {
   }
 
   if (submissionAction === "reject" && confirm(`Reject ${submission.name}?`)) {
-    api(`/api/submissions/${encodeURIComponent(id)}/reject`, { method: "POST" })
+    api(`/api/submissions/${encodeURIComponent(id)}/reject?listType=${encodeURIComponent(currentListType)}`, { method: "POST" })
       .then(refreshSubmissions)
       .catch((error) => alert(error.message));
   }
+});
+
+adminListType.addEventListener("change", async () => {
+  currentListType = adminListType.value;
+  clearForm();
+  await refreshPlayers();
+  await refreshSubmissions();
+});
+
+regionForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const name = newRegion.value.trim();
+  if (!name) return;
+  regions = await api("/api/regions", {
+    method: "POST",
+    body: JSON.stringify({ name })
+  });
+  newRegion.value = "";
+  populateRegionSelect();
+  renderRegions();
+});
+
+regionList.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-region]");
+  if (!button) return;
+  regions = await api(`/api/regions/${encodeURIComponent(button.dataset.region)}`, { method: "DELETE" });
+  populateRegionSelect();
+  renderRegions();
 });
 
 document.querySelector("#unlockAdmin").addEventListener("click", async () => {
@@ -242,6 +315,7 @@ document.querySelector("#unlockAdmin").addEventListener("click", async () => {
     isAdmin = true;
     adminLock.hidden = true;
     adminWorkspace.hidden = false;
+    await refreshRegions();
     await refreshPlayers();
     await refreshSubmissions();
   } catch (error) {
@@ -258,7 +332,10 @@ document.querySelector("#resetDemo").addEventListener("click", async () => {
   }
 
   if (!confirm("Reset the tier list back to the demo players?")) return;
-  players = await api("/api/players/reset", { method: "POST" });
+  players = await api("/api/players/reset", {
+    method: "POST",
+    body: JSON.stringify({ listType: currentListType })
+  });
   renderAdminList();
 });
 
@@ -274,10 +351,16 @@ document.querySelector("#exportData").addEventListener("click", async () => {
 
 async function init() {
   await api("/api/logout", { method: "POST" }).catch(() => null);
+  const config = await api("/api/config");
+  tiers = config.tiers || tiers;
+  listTypes = config.listTypes || listTypes;
+  populateListTypeSelect();
+  await refreshRegions();
   isAdmin = false;
   submissions = [];
-  players = await api("/api/players");
+  players = await api(`/api/players?listType=${encodeURIComponent(currentListType)}`);
   populateTierSelect();
+  populateRegionSelect();
   renderSubmissions();
   adminLock.hidden = false;
   adminWorkspace.hidden = true;
