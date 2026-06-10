@@ -10,12 +10,16 @@
     <header class="hero">
       <div class="hero__shade"></div>
       <nav class="topbar" aria-label="Main navigation">
-        <a class="brand" href="#tier-list">TO Tier List</a>
+        <a class="brand" href="/">Chivalry 2 Tier Lists</a>
+        <div class="topbar__actions">
+          <a class="button button--ghost" href="/">Team Objective</a>
+          <a class="button button--ghost" href="/ranked-duelists">Ranked Duelists</a>
+        </div>
       </nav>
       <section class="hero__content">
-        <p class="eyebrow">Chivalry 2 Team Objective Rankings</p>
-        <h1>Community Player Tiers for TO Mains.</h1>
-        <p class="hero__copy">Track standout players, grouped by tier, and notes on region, role, strengths, and current form.</p>
+        <p class="eyebrow" id="pageEyebrow">Chivalry 2 Team Objective Rankings</p>
+        <h1 id="pageTitle">Community Player Tiers for TO Mains.</h1>
+        <p class="hero__copy" id="pageCopy">Track standout players, grouped by tier, and notes on region, role, strengths, and current form.</p>
       </section>
     </header>
 
@@ -81,7 +85,7 @@
           </label>
           <label>
             <span>Region</span>
-            <input id="submissionRegion" maxlength="24" placeholder="NA East">
+            <select id="submissionRegion" required></select>
           </label>
           <label>
             <span>Role</span>
@@ -105,15 +109,17 @@
 
     <template id="playerCardTemplate">
       <article class="player-card">
-        <div class="player-card__top">
+        <button class="player-card__toggle" type="button" aria-expanded="false">
           <h3></h3>
           <span class="badge"></span>
+        </button>
+        <div class="player-card__details" hidden>
+          <dl class="meta-list"></dl>
+          <p></p>
         </div>
-        <dl class="meta-list"></dl>
-        <p></p>
       </article>
     </template>
 
-    <script src="script.js?v=submission-modal-20260609"></script>
+    <script src="script.js?v=multi-list-regions-20260609"></script>
   </body>
 </html>
