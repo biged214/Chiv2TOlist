@@ -167,7 +167,7 @@ textarea {
 
 .tier-board {
   display: grid;
-  gap: 14px;
+  gap: 10px;
 }
 
 .submission-callout {
@@ -275,8 +275,8 @@ textarea {
 
 .tier-row {
   display: grid;
-  grid-template-columns: 112px 1fr;
-  min-height: 132px;
+  grid-template-columns: 88px 1fr;
+  min-height: 0;
   border: 1px solid var(--line);
   background: var(--panel);
   box-shadow: 0 10px 24px rgba(35, 25, 15, 0.08);
@@ -285,33 +285,37 @@ textarea {
 .tier-label {
   display: grid;
   place-items: center;
-  padding: 18px;
+  padding: 10px;
   color: #fff7e7;
   background: var(--tier-color);
 }
 
 .tier-label strong {
-  font-size: 3rem;
+  font-size: 2rem;
   line-height: 1;
 }
 
 .tier-label span {
-  margin-top: 8px;
+  margin-top: 5px;
   color: rgba(255, 247, 231, 0.86);
-  font-size: 0.76rem;
+  font-size: 0.68rem;
   font-weight: 800;
   text-transform: uppercase;
 }
 
 .tier-players {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
   align-content: start;
-  padding: 14px;
+  padding: 10px;
 }
 
 .player-card {
+  width: fit-content;
+  min-width: 150px;
+  max-width: min(260px, 100%);
   min-height: 0;
   padding: 0;
   border: 1px solid #e4d7c5;
@@ -323,10 +327,11 @@ textarea {
 .player-card__toggle {
   display: flex;
   width: 100%;
+  min-height: 40px;
   justify-content: space-between;
   gap: 10px;
   align-items: center;
-  padding: 12px;
+  padding: 8px 10px;
   border: 0;
   color: var(--ink);
   background: transparent;
@@ -336,11 +341,12 @@ textarea {
 
 .player-card h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.95rem;
 }
 
 .player-card__details {
-  padding: 0 12px 12px;
+  width: 100%;
+  padding: 0 10px 10px;
   border-top: 1px solid #eadfce;
 }
 
@@ -408,7 +414,8 @@ textarea {
 .empty-state {
   display: grid;
   place-items: center;
-  min-height: 104px;
+  width: 100%;
+  min-height: 48px;
   color: var(--muted);
   border: 1px dashed var(--line);
   border-radius: 8px;
@@ -662,11 +669,11 @@ textarea {
   }
 
   .tier-label {
-    min-height: 88px;
+    min-height: 60px;
   }
 
   .tier-label strong {
-    font-size: 2.2rem;
+    font-size: 1.8rem;
   }
 
   .admin-panel__head,
