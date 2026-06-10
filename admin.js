@@ -6,6 +6,7 @@ let tiers = [
   { id: "watch", label: "D", name: "", color: "#4c3b62" }
 ];
 let players = [];
+let submissions = [];
 let isAdmin = false;
 
 const playerForm = document.querySelector("#playerForm");
@@ -18,6 +19,7 @@ const playerClan = document.querySelector("#playerClan");
 const playerPlayfabId = document.querySelector("#playerPlayfabId");
 const playerNotes = document.querySelector("#playerNotes");
 const adminList = document.querySelector("#adminList");
+const submissionList = document.querySelector("#submissionList");
 const adminWorkspace = document.querySelector("#adminWorkspace");
 const adminLock = document.querySelector("#adminLock");
 
@@ -83,6 +85,36 @@ function renderAdminList() {
   });
 }
 
+function renderSubmissions() {
+  submissionList.innerHTML = "";
+
+  if (!submissions.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "No pending submissions right now.";
+    submissionList.append(empty);
+    return;
+  }
+
+  submissions.forEach((submission) => {
+    const tier = tiers.find((item) => item.id === submission.tier);
+    const item = document.createElement("article");
+    item.className = "submission-item";
+    item.innerHTML = `
+      <div>
+        <strong>${escapeHtml(submission.name)}</strong>
+        <span>${escapeHtml(tier?.label || submission.tier)} tier - ${escapeHtml(submission.region || "Unknown region")} - ${escapeHtml(submission.role || "Flexible")}${submission.playfabId ? " - PlayFab included" : ""}</span>
+        <p>${escapeHtml(submission.notes || "No notes included.")}</p>
+      </div>
+      <div class="admin-actions">
+        <button class="mini-button mini-button--approve" type="button" data-submission-action="approve" data-id="${submission.id}">Approve</button>
+        <button class="mini-button" type="button" data-submission-action="reject" data-id="${submission.id}">Reject</button>
+      </div>
+    `;
+    submissionList.append(item);
+  });
+}
+
 function clearForm() {
   playerForm.reset();
   playerId.value = "";
@@ -92,6 +124,11 @@ function clearForm() {
 async function refreshPlayers() {
   players = await api("/api/players");
   renderAdminList();
+}
+
+async function refreshSubmissions() {
+  submissions = await api("/api/submissions");
+  renderSubmissions();
 }
 
 async function savePlayer(event) {
@@ -172,6 +209,30 @@ adminList.addEventListener("click", (event) => {
   }
 });
 
+submissionList.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-submission-action]");
+  if (!button) return;
+
+  const { submissionAction, id } = button.dataset;
+  const submission = submissions.find((item) => item.id === id);
+  if (!submission) return;
+
+  if (submissionAction === "approve") {
+    api(`/api/submissions/${encodeURIComponent(id)}/approve`, { method: "POST" })
+      .then(async () => {
+        await refreshPlayers();
+        await refreshSubmissions();
+      })
+      .catch((error) => alert(error.message));
+  }
+
+  if (submissionAction === "reject" && confirm(`Reject ${submission.name}?`)) {
+    api(`/api/submissions/${encodeURIComponent(id)}/reject`, { method: "POST" })
+      .then(refreshSubmissions)
+      .catch((error) => alert(error.message));
+  }
+});
+
 document.querySelector("#unlockAdmin").addEventListener("click", async () => {
   try {
     await api("/api/login", {
@@ -182,6 +243,7 @@ document.querySelector("#unlockAdmin").addEventListener("click", async () => {
     adminLock.hidden = true;
     adminWorkspace.hidden = false;
     await refreshPlayers();
+    await refreshSubmissions();
   } catch (error) {
     alert(error.message);
   }
@@ -213,8 +275,10 @@ document.querySelector("#exportData").addEventListener("click", async () => {
 async function init() {
   await api("/api/logout", { method: "POST" }).catch(() => null);
   isAdmin = false;
+  submissions = [];
   players = await api("/api/players");
   populateTierSelect();
+  renderSubmissions();
   adminLock.hidden = false;
   adminWorkspace.hidden = true;
   clearForm();
