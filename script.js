@@ -1,4 +1,5 @@
 let tiers = [
+  { id: "creator", label: "Creator", name: "", color: "#2f1f4f" },
   { id: "s", label: "S", name: "", color: "#7f1d1d" },
   { id: "a", label: "A", name: "", color: "#9b5d1f" },
   { id: "b", label: "B", name: "", color: "#50683e" },
@@ -95,6 +96,10 @@ function getFilters() {
   };
 }
 
+function publicSubmissionTiers() {
+  return tiers.filter((tier) => tier.id !== "creator");
+}
+
 function visiblePlayers() {
   const filters = getFilters();
   return players.filter((player) => {
@@ -115,6 +120,7 @@ function populateControls() {
   const selectedSubmissionRegion = submissionRegion.value;
   const selectedUpdateTier = updateRequestTier.value;
   const selectedUpdateRegion = updateRequestRegion.value;
+  const allowedSubmissionTiers = publicSubmissionTiers();
 
   tierFilter.innerHTML = `<option value="all">All tiers</option>`;
   submissionTier.innerHTML = "";
@@ -122,12 +128,15 @@ function populateControls() {
   tiers.forEach((tier) => {
     const label = tier.name ? `${tier.label} - ${tier.name}` : tier.label;
     tierFilter.append(new Option(label, tier.id));
+  });
+  allowedSubmissionTiers.forEach((tier) => {
+    const label = tier.name ? `${tier.label} - ${tier.name}` : tier.label;
     submissionTier.append(new Option(label, tier.id));
     updateRequestTier.append(new Option(label, tier.id));
   });
   tierFilter.value = tiers.some((tier) => tier.id === selectedTier) ? selectedTier : "all";
-  submissionTier.value = tiers.some((tier) => tier.id === selectedSubmissionTier) ? selectedSubmissionTier : tiers[2]?.id || "b";
-  updateRequestTier.value = tiers.some((tier) => tier.id === selectedUpdateTier) ? selectedUpdateTier : tiers[2]?.id || "b";
+  submissionTier.value = allowedSubmissionTiers.some((tier) => tier.id === selectedSubmissionTier) ? selectedSubmissionTier : allowedSubmissionTiers[1]?.id || "b";
+  updateRequestTier.value = allowedSubmissionTiers.some((tier) => tier.id === selectedUpdateTier) ? selectedUpdateTier : allowedSubmissionTiers[1]?.id || "b";
 
   regionFilter.innerHTML = `<option value="all">All regions</option>`;
   regions.forEach((region) => regionFilter.append(new Option(region, region)));
@@ -150,6 +159,7 @@ function renderTierBoard() {
 
     const row = document.createElement("section");
     row.className = "tier-row";
+    row.dataset.tierId = tier.id;
     row.style.setProperty("--tier-color", tier.color);
 
     const label = document.createElement("div");
@@ -240,10 +250,11 @@ function hideSubmissionModal() {
 }
 
 function showUpdateRequestModal(player) {
+  const allowedSubmissionTiers = publicSubmissionTiers();
   updateRequestPlayerId.value = player.id;
   updateRequestName.value = player.name || "";
   updateRequestPlayfabId.value = player.playfabId || "";
-  updateRequestTier.value = tiers.some((tier) => tier.id === player.tier) ? player.tier : tiers[2]?.id || "b";
+  updateRequestTier.value = allowedSubmissionTiers.some((tier) => tier.id === player.tier) ? player.tier : allowedSubmissionTiers[1]?.id || "b";
   updateRequestRegion.value = regions.includes(player.region) ? player.region : "";
   updateRequestRole.value = player.role || "";
   updateRequestClan.value = player.clan || "";
@@ -307,7 +318,7 @@ submissionForm.addEventListener("submit", async (event) => {
     });
 
     submissionForm.reset();
-    submissionTier.value = tiers[2]?.id || "b";
+    submissionTier.value = publicSubmissionTiers()[1]?.id || "b";
     submissionStatus.textContent = "Submission received. It will stay private until approved.";
   } catch (error) {
     submissionStatus.textContent = error.message;
