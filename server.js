@@ -9,8 +9,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
 const port = process.env.PORT || 3000;
-const adminPassword = process.env.ADMIN_PASSWORD || "mason-order";
-const sessionSecret = process.env.SESSION_SECRET || "change-this-session-secret";
+const adminPassword = process.env.ADMIN_PASSWORD;
+const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 const cookieName = "chiv2_admin";
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, "data");
 const playersFile = path.join(dataDir, "players.json");
@@ -545,6 +545,11 @@ app.get("/api/session", (request, response) => {
 });
 
 app.post("/api/login", (request, response) => {
+  if (!adminPassword) {
+    response.status(503).json({ error: "Admin password is not configured." });
+    return;
+  }
+
   if (request.body?.password !== adminPassword) {
     response.status(401).json({ error: "Wrong admin code." });
     return;
