@@ -187,6 +187,7 @@ function submissionEmbed(submission, title, color) {
       discordField("Region", submission.region || "Unknown"),
       discordField("Role", submission.role || "Flexible"),
       discordField("Clan", submission.clan || "None"),
+      discordField("Discord", submission.discordUsername || "Not provided"),
       discordField("PlayFab ID", submission.playfabId || "Not provided", false),
       discordField("Notes", submission.notes || "No notes included.", false)
     ],
@@ -223,6 +224,10 @@ function normalizeListType(value) {
   return listTypes.some((item) => item.id === value) ? value : defaultListType;
 }
 
+function normalizePublicSubmissionTier(value) {
+  return tiers.some((item) => item.id === value && item.id !== "creator") ? value : "b";
+}
+
 function normalizePlayer(input = {}, fallback = {}) {
   const tier = firstDefined(input.tier, fallback.tier, "b");
   const order = firstDefined(input.order, fallback.order, 1);
@@ -235,6 +240,7 @@ function normalizePlayer(input = {}, fallback = {}) {
     region: cleanText(firstDefined(input.region, fallback.region), 24),
     role: cleanText(firstDefined(input.role, fallback.role), 28),
     clan: cleanText(firstDefined(input.clan, fallback.clan), 28),
+    discordUsername: cleanText(firstDefined(input.discordUsername, input.discord_username, fallback.discordUsername, fallback.discord_username), 64),
     playfabId: cleanText(
       firstDefined(
         input.playfabId,
@@ -317,6 +323,7 @@ async function ensurePlayersTable(connection) {
       \`region\` VARCHAR(24) DEFAULT '',
       \`role\` VARCHAR(28) DEFAULT '',
       \`clan\` VARCHAR(28) DEFAULT '',
+      \`discord_username\` VARCHAR(64) DEFAULT '',
       \`playfab_id\` VARCHAR(64) DEFAULT '',
       \`notes\` VARCHAR(180) DEFAULT '',
       \`sort_order\` INT NOT NULL DEFAULT 1,
@@ -331,7 +338,8 @@ async function ensurePlayersTable(connection) {
     ["region", "VARCHAR(24) DEFAULT '' AFTER `tier`"],
     ["role", "VARCHAR(28) DEFAULT '' AFTER `region`"],
     ["clan", "VARCHAR(28) DEFAULT '' AFTER `role`"],
-    ["playfab_id", "VARCHAR(64) DEFAULT '' AFTER `clan`"],
+    ["discord_username", "VARCHAR(64) DEFAULT '' AFTER `clan`"],
+    ["playfab_id", "VARCHAR(64) DEFAULT '' AFTER `discord_username`"],
     ["notes", "VARCHAR(180) DEFAULT '' AFTER `playfab_id`"],
     ["sort_order", "INT NOT NULL DEFAULT 1 AFTER `notes`"],
     ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER `sort_order`"]
@@ -358,6 +366,7 @@ async function ensureSubmissionsTable(connection) {
       \`region\` VARCHAR(24) DEFAULT '',
       \`role\` VARCHAR(28) DEFAULT '',
       \`clan\` VARCHAR(28) DEFAULT '',
+      \`discord_username\` VARCHAR(64) DEFAULT '',
       \`playfab_id\` VARCHAR(64) DEFAULT '',
       \`notes\` VARCHAR(180) DEFAULT '',
       \`status\` VARCHAR(20) NOT NULL DEFAULT 'pending',
@@ -376,7 +385,8 @@ async function ensureSubmissionsTable(connection) {
     ["region", "VARCHAR(24) DEFAULT '' AFTER `tier`"],
     ["role", "VARCHAR(28) DEFAULT '' AFTER `region`"],
     ["clan", "VARCHAR(28) DEFAULT '' AFTER `role`"],
-    ["playfab_id", "VARCHAR(64) DEFAULT '' AFTER `clan`"],
+    ["discord_username", "VARCHAR(64) DEFAULT '' AFTER `clan`"],
+    ["playfab_id", "VARCHAR(64) DEFAULT '' AFTER `discord_username`"],
     ["notes", "VARCHAR(180) DEFAULT '' AFTER `playfab_id`"],
     ["status", "VARCHAR(20) NOT NULL DEFAULT 'pending' AFTER `notes`"],
     ["request_type", "VARCHAR(20) NOT NULL DEFAULT 'new' AFTER `status`"],
@@ -417,6 +427,7 @@ function rowToPlayer(row) {
     region: row.region,
     role: row.role,
     clan: row.clan,
+    discordUsername: row.discord_username,
     playfabId: row.playfab_id,
     notes: row.notes,
     order: row.sort_order
@@ -445,6 +456,7 @@ function rowToSubmission(row) {
     region: row.region,
     role: row.role,
     clan: row.clan,
+    discordUsername: row.discord_username,
     playfabId: row.playfab_id,
     notes: row.notes,
     status: row.status,
@@ -491,7 +503,7 @@ async function writeSubmissions(submissions, listType = defaultListType) {
 async function readSubmissionsFromDatabase(listType = defaultListType) {
   return withDatabase(async (connection) => {
     const [rows] = await connection.execute(
-      "SELECT `id`, `list_type`, `name`, `tier`, `region`, `role`, `clan`, `playfab_id`, `notes`, `status`, `request_type`, `target_player_id`, `created_at` FROM `submissions` WHERE `list_type` = ? ORDER BY `created_at` ASC, `name` ASC",
+      "SELECT `id`, `list_type`, `name`, `tier`, `region`, `role`, `clan`, `discord_username`, `playfab_id`, `notes`, `status`, `request_type`, `target_player_id`, `created_at` FROM `submissions` WHERE `list_type` = ? ORDER BY `created_at` ASC, `name` ASC",
       [normalizeListType(listType)]
     );
     return rows.map(rowToSubmission);
@@ -502,8 +514,8 @@ async function saveSubmissionToDatabase(submission) {
   return withDatabase(async (connection) => {
     const normalized = normalizeSubmission(submission);
     await connection.execute(
-      `INSERT INTO \`submissions\` (\`id\`, \`list_type\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`playfab_id\`, \`notes\`, \`status\`, \`request_type\`, \`target_player_id\`)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO \`submissions\` (\`id\`, \`list_type\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`discord_username\`, \`playfab_id\`, \`notes\`, \`status\`, \`request_type\`, \`target_player_id\`)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
          \`list_type\` = VALUES(\`list_type\`),
          \`name\` = VALUES(\`name\`),
@@ -511,6 +523,7 @@ async function saveSubmissionToDatabase(submission) {
          \`region\` = VALUES(\`region\`),
          \`role\` = VALUES(\`role\`),
          \`clan\` = VALUES(\`clan\`),
+         \`discord_username\` = VALUES(\`discord_username\`),
          \`playfab_id\` = VALUES(\`playfab_id\`),
          \`notes\` = VALUES(\`notes\`),
          \`status\` = VALUES(\`status\`),
@@ -524,6 +537,7 @@ async function saveSubmissionToDatabase(submission) {
         normalized.region,
         normalized.role,
         normalized.clan,
+        normalized.discordUsername,
         normalized.playfabId,
         normalized.notes,
         normalized.status,
@@ -544,8 +558,8 @@ async function writeSubmissionsToDatabase(submissions, listType = defaultListTyp
       await connection.execute("DELETE FROM `submissions` WHERE `list_type` = ?", [normalizedListType]);
       for (const submission of submissions.map((item) => normalizeSubmission(item)).sort(byCreated)) {
         await connection.execute(
-          `INSERT INTO \`submissions\` (\`id\`, \`list_type\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`playfab_id\`, \`notes\`, \`status\`, \`request_type\`, \`target_player_id\`)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO \`submissions\` (\`id\`, \`list_type\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`discord_username\`, \`playfab_id\`, \`notes\`, \`status\`, \`request_type\`, \`target_player_id\`)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             submission.id,
             normalizedListType,
@@ -554,6 +568,7 @@ async function writeSubmissionsToDatabase(submissions, listType = defaultListTyp
             submission.region,
             submission.role,
             submission.clan,
+            submission.discordUsername,
             submission.playfabId,
             submission.notes,
             submission.status,
@@ -574,7 +589,7 @@ async function readPlayersFromDatabase(listType = defaultListType) {
   return withDatabase(async (connection) => {
     const normalizedListType = normalizeListType(listType);
     const [rows] = await connection.execute(
-      "SELECT `id`, `list_type`, `name`, `tier`, `region`, `role`, `clan`, `playfab_id`, `notes`, `sort_order` FROM `players` WHERE `list_type` = ? ORDER BY `sort_order` ASC, `name` ASC",
+      "SELECT `id`, `list_type`, `name`, `tier`, `region`, `role`, `clan`, `discord_username`, `playfab_id`, `notes`, `sort_order` FROM `players` WHERE `list_type` = ? ORDER BY `sort_order` ASC, `name` ASC",
       [normalizedListType]
     );
     if (rows.length) return rows.map(rowToPlayer);
@@ -590,8 +605,8 @@ async function savePlayerToDatabase(player) {
   return withDatabase(async (connection) => {
     const normalized = normalizePlayer(player);
     await connection.execute(
-      `INSERT INTO \`players\` (\`id\`, \`list_type\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`playfab_id\`, \`notes\`, \`sort_order\`)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO \`players\` (\`id\`, \`list_type\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`discord_username\`, \`playfab_id\`, \`notes\`, \`sort_order\`)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
          \`list_type\` = VALUES(\`list_type\`),
          \`name\` = VALUES(\`name\`),
@@ -599,6 +614,7 @@ async function savePlayerToDatabase(player) {
          \`region\` = VALUES(\`region\`),
          \`role\` = VALUES(\`role\`),
          \`clan\` = VALUES(\`clan\`),
+         \`discord_username\` = VALUES(\`discord_username\`),
          \`playfab_id\` = VALUES(\`playfab_id\`),
          \`notes\` = VALUES(\`notes\`),
          \`sort_order\` = VALUES(\`sort_order\`)`,
@@ -610,6 +626,7 @@ async function savePlayerToDatabase(player) {
         normalized.region,
         normalized.role,
         normalized.clan,
+        normalized.discordUsername,
         normalized.playfabId,
         normalized.notes,
         normalized.order
@@ -622,7 +639,7 @@ async function savePlayerToDatabase(player) {
     ]);
 
     const [rows] = await connection.execute(
-      "SELECT `id`, `list_type`, `name`, `tier`, `region`, `role`, `clan`, `playfab_id`, `notes`, `sort_order` FROM `players` WHERE `id` = ? LIMIT 1",
+      "SELECT `id`, `list_type`, `name`, `tier`, `region`, `role`, `clan`, `discord_username`, `playfab_id`, `notes`, `sort_order` FROM `players` WHERE `id` = ? LIMIT 1",
       [normalized.id]
     );
     const saved = rows.length ? rowToPlayer(rows[0]) : normalized;
@@ -650,8 +667,8 @@ async function writePlayersToDatabase(players, listType = defaultListType) {
       await connection.execute("DELETE FROM `players` WHERE `list_type` = ?", [normalizedListType]);
       for (const player of sortedPlayers) {
         await connection.execute(
-          `INSERT INTO \`players\` (\`id\`, \`list_type\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`playfab_id\`, \`notes\`, \`sort_order\`)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO \`players\` (\`id\`, \`list_type\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`discord_username\`, \`playfab_id\`, \`notes\`, \`sort_order\`)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             player.id,
             normalizedListType,
@@ -660,6 +677,7 @@ async function writePlayersToDatabase(players, listType = defaultListType) {
             player.region,
             player.role,
             player.clan,
+            player.discordUsername,
             player.playfabId,
             player.notes,
             player.order
@@ -923,6 +941,7 @@ app.post("/api/submissions", async (request, response, next) => {
     const submission = normalizeSubmission({
       ...request.body,
       listType,
+      tier: normalizePublicSubmissionTier(request.body?.tier),
       region: await ensureRegionAllowed(request.body?.region),
       id: crypto.randomUUID(),
       status: "pending",
@@ -967,6 +986,7 @@ app.post("/api/update-requests", async (request, response, next) => {
       {
         ...request.body,
         listType,
+        tier: normalizePublicSubmissionTier(request.body?.tier),
         region: await ensureRegionAllowed(request.body?.region),
         id: crypto.randomUUID(),
         status: "pending",
