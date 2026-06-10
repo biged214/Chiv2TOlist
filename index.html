@@ -40,6 +40,48 @@
       </section>
 
       <section class="tier-board" id="tier-list" aria-live="polite"></section>
+
+      <section class="submission-panel" aria-labelledby="submission-title">
+        <div class="submission-panel__intro">
+          <p class="eyebrow">Community Submissions</p>
+          <h2 id="submission-title">Submit a player for review</h2>
+          <p>Send in your own details for consideration. Submissions are reviewed before they appear on the public tier list.</p>
+        </div>
+        <form class="submission-form" id="submissionForm">
+          <label>
+            <span>Player name</span>
+            <input id="submissionName" required maxlength="40" placeholder="Your in-game name">
+          </label>
+          <label>
+            <span>PlayFab ID</span>
+            <input id="submissionPlayfabId" maxlength="64" placeholder="EFEA435B1E22C73C">
+          </label>
+          <label>
+            <span>Suggested tier</span>
+            <select id="submissionTier"></select>
+          </label>
+          <label>
+            <span>Region</span>
+            <input id="submissionRegion" maxlength="24" placeholder="NA East">
+          </label>
+          <label>
+            <span>Role</span>
+            <input id="submissionRole" maxlength="28" placeholder="Frontline / Engineer">
+          </label>
+          <label>
+            <span>Clan or team</span>
+            <input id="submissionClan" maxlength="28" placeholder="Optional">
+          </label>
+          <label class="submission-form__wide">
+            <span>Why should this player be listed?</span>
+            <textarea id="submissionNotes" rows="4" maxlength="180" placeholder="Short note about objective play, role, region, or recent form"></textarea>
+          </label>
+          <div class="submission-form__actions">
+            <button class="button" type="submit">Submit for Review</button>
+            <p class="form-status" id="submissionStatus" aria-live="polite"></p>
+          </div>
+        </form>
+      </section>
     </main>
 
     <template id="playerCardTemplate">
@@ -53,6 +95,6 @@
       </article>
     </template>
 
-    <script src="script.js"></script>
+    <script src="script.js?v=submissions-20260609"></script>
   </body>
 </html>
