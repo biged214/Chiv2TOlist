@@ -168,7 +168,7 @@ function renderPlayerCard(player) {
   [
     ["Region", player.region || "Unknown"],
     ["Role", player.role || "Flexible"],
-    ["Team", player.clan || "None"]
+    ["Clan", player.clan || "None"]
   ].forEach(([label, value]) => {
     const item = document.createElement("div");
     item.innerHTML = `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`;
