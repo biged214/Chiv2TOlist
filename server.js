@@ -32,6 +32,7 @@ function hasDatabase() {
 }
 
 const tiers = [
+  { id: "creator", label: "Creator", name: "", color: "#2f1f4f" },
   { id: "s", label: "S", name: "", color: "#7f1d1d" },
   { id: "a", label: "A", name: "", color: "#9b5d1f" },
   { id: "b", label: "B", name: "", color: "#50683e" },
