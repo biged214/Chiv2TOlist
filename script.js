@@ -11,6 +11,15 @@ const tierBoard = document.querySelector("#tier-list");
 const tierFilter = document.querySelector("#tierFilter");
 const regionFilter = document.querySelector("#regionFilter");
 const searchInput = document.querySelector("#searchInput");
+const submissionForm = document.querySelector("#submissionForm");
+const submissionName = document.querySelector("#submissionName");
+const submissionPlayfabId = document.querySelector("#submissionPlayfabId");
+const submissionTier = document.querySelector("#submissionTier");
+const submissionRegion = document.querySelector("#submissionRegion");
+const submissionRole = document.querySelector("#submissionRole");
+const submissionClan = document.querySelector("#submissionClan");
+const submissionNotes = document.querySelector("#submissionNotes");
+const submissionStatus = document.querySelector("#submissionStatus");
 
 function escapeHtml(value) {
   return String(value)
@@ -21,9 +30,16 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-async function api(path) {
-  const response = await fetch(path, { credentials: "same-origin" });
-  if (!response.ok) throw new Error("Could not load tier list.");
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...options
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: "Could not load tier list." }));
+    throw new Error(error.error || "Could not load tier list.");
+  }
   return response.json();
 }
 
@@ -63,13 +79,17 @@ function visiblePlayers() {
 function populateControls() {
   const selectedTier = tierFilter.value;
   const selectedRegion = regionFilter.value;
+  const selectedSubmissionTier = submissionTier.value;
 
   tierFilter.innerHTML = `<option value="all">All tiers</option>`;
+  submissionTier.innerHTML = "";
   tiers.forEach((tier) => {
     const label = tier.name ? `${tier.label} - ${tier.name}` : tier.label;
     tierFilter.append(new Option(label, tier.id));
+    submissionTier.append(new Option(label, tier.id));
   });
   tierFilter.value = tiers.some((tier) => tier.id === selectedTier) ? selectedTier : "all";
+  submissionTier.value = tiers.some((tier) => tier.id === selectedSubmissionTier) ? selectedSubmissionTier : tiers[2]?.id || "b";
 
   const regions = [...new Set(players.map((player) => player.region).filter(Boolean))].sort();
   regionFilter.innerHTML = `<option value="all">All regions</option>`;
@@ -150,6 +170,33 @@ function render() {
 
 [tierFilter, regionFilter, searchInput].forEach((control) => {
   control.addEventListener("input", renderTierBoard);
+});
+
+submissionForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  submissionStatus.textContent = "Sending submission...";
+
+  try {
+    await api("/api/submissions", {
+      method: "POST",
+      body: JSON.stringify({
+        name: submissionName.value.trim(),
+        playfabId: submissionPlayfabId.value.trim(),
+        playfab_id: submissionPlayfabId.value.trim(),
+        tier: submissionTier.value,
+        region: submissionRegion.value.trim(),
+        role: submissionRole.value.trim(),
+        clan: submissionClan.value.trim(),
+        notes: submissionNotes.value.trim()
+      })
+    });
+
+    submissionForm.reset();
+    submissionTier.value = tiers[2]?.id || "b";
+    submissionStatus.textContent = "Submission received. It will stay private until approved.";
+  } catch (error) {
+    submissionStatus.textContent = error.message;
+  }
 });
 
 async function init() {
