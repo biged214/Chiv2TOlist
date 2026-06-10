@@ -12,8 +12,9 @@ const port = process.env.PORT || 3000;
 const adminPassword = process.env.ADMIN_PASSWORD || "mason-order";
 const sessionSecret = process.env.SESSION_SECRET || "change-this-session-secret";
 const cookieName = "chiv2_admin";
-const dataDir = path.join(__dirname, "data");
+const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, "data");
 const playersFile = path.join(dataDir, "players.json");
+const submissionsFile = path.join(dataDir, "submissions.json");
 function hasDatabase() {
   return Boolean(process.env.DB_HOST && process.env.DB_NAME && process.env.DB_USER);
 }
@@ -70,6 +71,12 @@ const starterPlayers = [
 ];
 
 app.use(express.json({ limit: "1mb" }));
+app.use((request, response, next) => {
+  if (request.path === "/admin" || request.path === "/admin.html" || request.path === "/admin.js") {
+    response.set("Cache-Control", "no-store");
+  }
+  next();
+});
 app.use(express.static(__dirname));
 
 function parseCookies(header = "") {
@@ -137,7 +144,17 @@ function normalizePlayer(input = {}, fallback = {}) {
     region: cleanText(firstDefined(input.region, fallback.region), 24),
     role: cleanText(firstDefined(input.role, fallback.role), 28),
     clan: cleanText(firstDefined(input.clan, fallback.clan), 28),
-    playfabId: cleanText(firstDefined(input.playfabId, input.playfab_id, fallback.playfabId, fallback.playfab_id), 64),
+    playfabId: cleanText(
+      firstDefined(
+        input.playfabId,
+        input.playfab_id,
+        input.playerfabId,
+        input.playerfab_id,
+        fallback.playfabId,
+        fallback.playfab_id
+      ),
+      64
+    ),
     notes: cleanText(firstDefined(input.notes, fallback.notes), 180),
     order: Number.isFinite(Number(order)) ? Number(order) : 1
   };
@@ -184,6 +201,7 @@ async function withDatabase(callback) {
   const connection = await mysql.createConnection(databaseConfig());
   try {
     await ensurePlayersTable(connection);
+    await ensureSubmissionsTable(connection);
     return await callback(connection);
   } finally {
     await connection.end();
@@ -229,6 +247,44 @@ async function ensurePlayersTable(connection) {
   }
 }
 
+async function ensureSubmissionsTable(connection) {
+  await connection.execute(`
+    CREATE TABLE IF NOT EXISTS \`submissions\` (
+      \`id\` VARCHAR(80) PRIMARY KEY,
+      \`name\` VARCHAR(40) NOT NULL,
+      \`tier\` VARCHAR(20) NOT NULL DEFAULT 'b',
+      \`region\` VARCHAR(24) DEFAULT '',
+      \`role\` VARCHAR(28) DEFAULT '',
+      \`clan\` VARCHAR(28) DEFAULT '',
+      \`playfab_id\` VARCHAR(64) DEFAULT '',
+      \`notes\` VARCHAR(180) DEFAULT '',
+      \`status\` VARCHAR(20) NOT NULL DEFAULT 'pending',
+      \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
+  const [columns] = await connection.execute("SHOW COLUMNS FROM `submissions`");
+  const columnNames = new Set(columns.map((column) => column.Field));
+  const requiredColumns = [
+    ["tier", "VARCHAR(20) NOT NULL DEFAULT 'b' AFTER `name`"],
+    ["region", "VARCHAR(24) DEFAULT '' AFTER `tier`"],
+    ["role", "VARCHAR(28) DEFAULT '' AFTER `region`"],
+    ["clan", "VARCHAR(28) DEFAULT '' AFTER `role`"],
+    ["playfab_id", "VARCHAR(64) DEFAULT '' AFTER `clan`"],
+    ["notes", "VARCHAR(180) DEFAULT '' AFTER `playfab_id`"],
+    ["status", "VARCHAR(20) NOT NULL DEFAULT 'pending' AFTER `notes`"],
+    ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER `status`"],
+    ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER `created_at`"]
+  ];
+
+  for (const [name, definition] of requiredColumns) {
+    if (!columnNames.has(name)) {
+      await connection.execute(`ALTER TABLE \`submissions\` ADD COLUMN \`${name}\` ${definition}`);
+    }
+  }
+}
+
 function rowToPlayer(row) {
   return normalizePlayer({
     id: row.id,
@@ -240,6 +296,129 @@ function rowToPlayer(row) {
     playfabId: row.playfab_id,
     notes: row.notes,
     order: row.sort_order
+  });
+}
+
+function normalizeSubmission(input = {}, fallback = {}) {
+  const player = normalizePlayer(input, fallback);
+  const status = cleanText(firstDefined(input.status, fallback.status, "pending"), 20);
+  return {
+    ...player,
+    status: ["pending", "approved", "rejected"].includes(status) ? status : "pending",
+    createdAt: firstDefined(input.createdAt, input.created_at, fallback.createdAt, fallback.created_at, new Date().toISOString())
+  };
+}
+
+function rowToSubmission(row) {
+  return normalizeSubmission({
+    id: row.id,
+    name: row.name,
+    tier: row.tier,
+    region: row.region,
+    role: row.role,
+    clan: row.clan,
+    playfabId: row.playfab_id,
+    notes: row.notes,
+    status: row.status,
+    createdAt: row.created_at
+  });
+}
+
+async function readSubmissions() {
+  if (hasDatabase()) return readSubmissionsFromDatabase();
+  return readSubmissionsFromFile();
+}
+
+async function readSubmissionsFromFile() {
+  try {
+    const raw = await fs.readFile(submissionsFile, "utf8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map((submission) => normalizeSubmission(submission)).sort(byCreated) : [];
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    await writeSubmissions([]);
+    return [];
+  }
+}
+
+async function writeSubmissions(submissions) {
+  if (hasDatabase()) {
+    await writeSubmissionsToDatabase(submissions);
+    return;
+  }
+
+  await fs.mkdir(dataDir, { recursive: true });
+  await fs.writeFile(submissionsFile, `${JSON.stringify(submissions.sort(byCreated), null, 2)}\n`);
+}
+
+async function readSubmissionsFromDatabase() {
+  return withDatabase(async (connection) => {
+    const [rows] = await connection.execute(
+      "SELECT `id`, `name`, `tier`, `region`, `role`, `clan`, `playfab_id`, `notes`, `status`, `created_at` FROM `submissions` ORDER BY `created_at` ASC, `name` ASC"
+    );
+    return rows.map(rowToSubmission);
+  });
+}
+
+async function saveSubmissionToDatabase(submission) {
+  return withDatabase(async (connection) => {
+    const normalized = normalizeSubmission(submission);
+    await connection.execute(
+      `INSERT INTO \`submissions\` (\`id\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`playfab_id\`, \`notes\`, \`status\`)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         \`name\` = VALUES(\`name\`),
+         \`tier\` = VALUES(\`tier\`),
+         \`region\` = VALUES(\`region\`),
+         \`role\` = VALUES(\`role\`),
+         \`clan\` = VALUES(\`clan\`),
+         \`playfab_id\` = VALUES(\`playfab_id\`),
+         \`notes\` = VALUES(\`notes\`),
+         \`status\` = VALUES(\`status\`)`,
+      [
+        normalized.id,
+        normalized.name,
+        normalized.tier,
+        normalized.region,
+        normalized.role,
+        normalized.clan,
+        normalized.playfabId,
+        normalized.notes,
+        normalized.status
+      ]
+    );
+
+    return normalized;
+  });
+}
+
+async function writeSubmissionsToDatabase(submissions) {
+  return withDatabase(async (connection) => {
+    await connection.beginTransaction();
+    try {
+      await connection.execute("DELETE FROM `submissions`");
+      for (const submission of submissions.map((item) => normalizeSubmission(item)).sort(byCreated)) {
+        await connection.execute(
+          `INSERT INTO \`submissions\` (\`id\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`playfab_id\`, \`notes\`, \`status\`)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            submission.id,
+            submission.name,
+            submission.tier,
+            submission.region,
+            submission.role,
+            submission.clan,
+            submission.playfabId,
+            submission.notes,
+            submission.status
+          ]
+        );
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    }
   });
 }
 
@@ -342,6 +521,10 @@ async function writePlayersToDatabase(players) {
 
 function byOrder(a, b) {
   return a.order - b.order || a.name.localeCompare(b.name);
+}
+
+function byCreated(a, b) {
+  return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.name.localeCompare(b.name);
 }
 
 app.get("/api/config", (_request, response) => {
@@ -478,6 +661,97 @@ app.post("/api/players/import", requireAdmin, async (request, response, next) =>
       : [];
     await writePlayers(nextPlayers);
     response.json(nextPlayers);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/submissions", async (request, response, next) => {
+  try {
+    const submission = normalizeSubmission({
+      ...request.body,
+      id: crypto.randomUUID(),
+      status: "pending",
+      createdAt: new Date().toISOString()
+    });
+
+    if (!submission.name) {
+      response.status(400).json({ error: "Player name is required." });
+      return;
+    }
+
+    if (hasDatabase()) {
+      response.status(201).json(await saveSubmissionToDatabase(submission));
+      return;
+    }
+
+    const submissions = await readSubmissions();
+    submissions.push(submission);
+    await writeSubmissions(submissions);
+    response.status(201).json(submission);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/submissions", requireAdmin, async (_request, response, next) => {
+  try {
+    const submissions = await readSubmissions();
+    response.json(submissions.filter((submission) => submission.status === "pending"));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/submissions/:id/approve", requireAdmin, async (request, response, next) => {
+  try {
+    const submissions = await readSubmissions();
+    const submission = submissions.find((item) => item.id === request.params.id);
+    if (!submission) {
+      response.status(404).json({ error: "Submission not found." });
+      return;
+    }
+
+    const players = await readPlayers();
+    const approvedPlayer = normalizePlayer({
+      ...submission,
+      id: crypto.randomUUID(),
+      order: players.length ? Math.max(...players.map((player) => player.order)) + 1 : 1
+    });
+
+    if (hasDatabase()) {
+      await savePlayerToDatabase(approvedPlayer);
+      await saveSubmissionToDatabase({ ...submission, status: "approved" });
+      response.json({ player: approvedPlayer });
+      return;
+    }
+
+    players.push(approvedPlayer);
+    await writePlayers(players);
+    await writeSubmissions(submissions.map((item) => (item.id === submission.id ? { ...item, status: "approved" } : item)));
+    response.json({ player: approvedPlayer });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/submissions/:id/reject", requireAdmin, async (request, response, next) => {
+  try {
+    const submissions = await readSubmissions();
+    const submission = submissions.find((item) => item.id === request.params.id);
+    if (!submission) {
+      response.status(404).json({ error: "Submission not found." });
+      return;
+    }
+
+    if (hasDatabase()) {
+      await saveSubmissionToDatabase({ ...submission, status: "rejected" });
+      response.json({ ok: true });
+      return;
+    }
+
+    await writeSubmissions(submissions.map((item) => (item.id === submission.id ? { ...item, status: "rejected" } : item)));
+    response.json({ ok: true });
   } catch (error) {
     next(error);
   }
