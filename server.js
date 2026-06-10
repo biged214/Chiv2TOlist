@@ -12,9 +12,16 @@ const port = process.env.PORT || 3000;
 const adminPassword = process.env.ADMIN_PASSWORD;
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 const cookieName = "chiv2_admin";
+const defaultListType = "team_objective";
+const listTypes = [
+  { id: "team_objective", label: "Team Objective", path: "/" },
+  { id: "ranked_duelist", label: "Ranked Duelists", path: "/ranked-duelists" }
+];
+const defaultRegions = ["NA East", "NA Central", "NA West", "EU", "OCE", "SA", "SEA"];
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, "data");
 const playersFile = path.join(dataDir, "players.json");
 const submissionsFile = path.join(dataDir, "submissions.json");
+const regionsFile = path.join(dataDir, "regions.json");
 function hasDatabase() {
   return Boolean(process.env.DB_HOST && process.env.DB_NAME && process.env.DB_USER);
 }
@@ -133,12 +140,17 @@ function cleanText(value, maxLength) {
   return String(value ?? "").trim().slice(0, maxLength);
 }
 
+function normalizeListType(value) {
+  return listTypes.some((item) => item.id === value) ? value : defaultListType;
+}
+
 function normalizePlayer(input = {}, fallback = {}) {
   const tier = firstDefined(input.tier, fallback.tier, "b");
   const order = firstDefined(input.order, fallback.order, 1);
 
   return {
     id: cleanText(firstDefined(input.id, fallback.id, crypto.randomUUID()), 80),
+    listType: normalizeListType(firstDefined(input.listType, input.list_type, fallback.listType, fallback.list_type)),
     name: cleanText(firstDefined(input.name, fallback.name), 40),
     tier: tiers.some((item) => item.id === tier) ? tier : "b",
     region: cleanText(firstDefined(input.region, fallback.region), 24),
@@ -160,31 +172,38 @@ function normalizePlayer(input = {}, fallback = {}) {
   };
 }
 
-async function readPlayers() {
-  if (hasDatabase()) return readPlayersFromDatabase();
-  return readPlayersFromFile();
+async function readPlayers(listType = defaultListType) {
+  if (hasDatabase()) return readPlayersFromDatabase(listType);
+  return readPlayersFromFile(listType);
 }
 
-async function readPlayersFromFile() {
+async function readAllPlayersFromFile() {
   try {
     const raw = await fs.readFile(playersFile, "utf8");
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.map((player) => normalizePlayer(player)).sort(byOrder) : starterPlayers;
+    return Array.isArray(parsed) ? parsed.map((player) => normalizePlayer(player)) : starterPlayers;
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
-    await writePlayers(starterPlayers);
     return starterPlayers;
   }
 }
 
-async function writePlayers(players) {
+async function readPlayersFromFile(listType = defaultListType) {
+  return (await readAllPlayersFromFile()).filter((player) => player.listType === listType).sort(byOrder);
+}
+
+async function writePlayers(players, listType = defaultListType) {
   if (hasDatabase()) {
-    await writePlayersToDatabase(players);
+    await writePlayersToDatabase(players, listType);
     return;
   }
 
+  const normalizedListType = normalizeListType(listType);
+  const existingPlayers = await readAllPlayersFromFile();
+  const otherPlayers = existingPlayers.filter((player) => player.listType !== normalizedListType);
+  const nextPlayers = players.map((player) => normalizePlayer({ ...player, listType: normalizedListType })).sort(byOrder);
   await fs.mkdir(dataDir, { recursive: true });
-  await fs.writeFile(playersFile, `${JSON.stringify(players.sort(byOrder), null, 2)}\n`);
+  await fs.writeFile(playersFile, `${JSON.stringify([...otherPlayers, ...nextPlayers], null, 2)}\n`);
 }
 
 function databaseConfig() {
@@ -202,6 +221,7 @@ async function withDatabase(callback) {
   try {
     await ensurePlayersTable(connection);
     await ensureSubmissionsTable(connection);
+    await ensureRegionsTable(connection);
     return await callback(connection);
   } finally {
     await connection.end();
@@ -212,6 +232,7 @@ async function ensurePlayersTable(connection) {
   await connection.execute(`
     CREATE TABLE IF NOT EXISTS \`players\` (
       \`id\` VARCHAR(80) PRIMARY KEY,
+      \`list_type\` VARCHAR(40) NOT NULL DEFAULT 'team_objective',
       \`name\` VARCHAR(40) NOT NULL,
       \`tier\` VARCHAR(20) NOT NULL,
       \`region\` VARCHAR(24) DEFAULT '',
@@ -227,6 +248,7 @@ async function ensurePlayersTable(connection) {
   const [columns] = await connection.execute("SHOW COLUMNS FROM `players`");
   const columnNames = new Set(columns.map((column) => column.Field));
   const requiredColumns = [
+    ["list_type", "VARCHAR(40) NOT NULL DEFAULT 'team_objective' AFTER `id`"],
     ["region", "VARCHAR(24) DEFAULT '' AFTER `tier`"],
     ["role", "VARCHAR(28) DEFAULT '' AFTER `region`"],
     ["clan", "VARCHAR(28) DEFAULT '' AFTER `role`"],
@@ -251,6 +273,7 @@ async function ensureSubmissionsTable(connection) {
   await connection.execute(`
     CREATE TABLE IF NOT EXISTS \`submissions\` (
       \`id\` VARCHAR(80) PRIMARY KEY,
+      \`list_type\` VARCHAR(40) NOT NULL DEFAULT 'team_objective',
       \`name\` VARCHAR(40) NOT NULL,
       \`tier\` VARCHAR(20) NOT NULL DEFAULT 'b',
       \`region\` VARCHAR(24) DEFAULT '',
@@ -267,6 +290,7 @@ async function ensureSubmissionsTable(connection) {
   const [columns] = await connection.execute("SHOW COLUMNS FROM `submissions`");
   const columnNames = new Set(columns.map((column) => column.Field));
   const requiredColumns = [
+    ["list_type", "VARCHAR(40) NOT NULL DEFAULT 'team_objective' AFTER `id`"],
     ["tier", "VARCHAR(20) NOT NULL DEFAULT 'b' AFTER `name`"],
     ["region", "VARCHAR(24) DEFAULT '' AFTER `tier`"],
     ["role", "VARCHAR(28) DEFAULT '' AFTER `region`"],
@@ -285,9 +309,26 @@ async function ensureSubmissionsTable(connection) {
   }
 }
 
+async function ensureRegionsTable(connection) {
+  await connection.execute(`
+    CREATE TABLE IF NOT EXISTS \`regions\` (
+      \`name\` VARCHAR(24) PRIMARY KEY,
+      \`sort_order\` INT NOT NULL DEFAULT 1
+    )
+  `);
+
+  const [rows] = await connection.execute("SELECT COUNT(*) AS count FROM `regions`");
+  if (!Number(rows[0]?.count)) {
+    for (const [index, region] of defaultRegions.entries()) {
+      await connection.execute("INSERT INTO `regions` (`name`, `sort_order`) VALUES (?, ?)", [region, index + 1]);
+    }
+  }
+}
+
 function rowToPlayer(row) {
   return normalizePlayer({
     id: row.id,
+    listType: row.list_type,
     name: row.name,
     tier: row.tier,
     region: row.region,
@@ -312,6 +353,7 @@ function normalizeSubmission(input = {}, fallback = {}) {
 function rowToSubmission(row) {
   return normalizeSubmission({
     id: row.id,
+    listType: row.list_type,
     name: row.name,
     tier: row.tier,
     region: row.region,
@@ -324,37 +366,45 @@ function rowToSubmission(row) {
   });
 }
 
-async function readSubmissions() {
-  if (hasDatabase()) return readSubmissionsFromDatabase();
-  return readSubmissionsFromFile();
+async function readSubmissions(listType = defaultListType) {
+  if (hasDatabase()) return readSubmissionsFromDatabase(listType);
+  return readSubmissionsFromFile(listType);
 }
 
-async function readSubmissionsFromFile() {
+async function readAllSubmissionsFromFile() {
   try {
     const raw = await fs.readFile(submissionsFile, "utf8");
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.map((submission) => normalizeSubmission(submission)).sort(byCreated) : [];
+    return Array.isArray(parsed) ? parsed.map((submission) => normalizeSubmission(submission)) : [];
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
-    await writeSubmissions([]);
     return [];
   }
 }
 
-async function writeSubmissions(submissions) {
+async function readSubmissionsFromFile(listType = defaultListType) {
+  return (await readAllSubmissionsFromFile()).filter((submission) => submission.listType === listType).sort(byCreated);
+}
+
+async function writeSubmissions(submissions, listType = defaultListType) {
   if (hasDatabase()) {
-    await writeSubmissionsToDatabase(submissions);
+    await writeSubmissionsToDatabase(submissions, listType);
     return;
   }
 
+  const normalizedListType = normalizeListType(listType);
+  const existingSubmissions = await readAllSubmissionsFromFile();
+  const otherSubmissions = existingSubmissions.filter((submission) => submission.listType !== normalizedListType);
+  const nextSubmissions = submissions.map((submission) => normalizeSubmission({ ...submission, listType: normalizedListType })).sort(byCreated);
   await fs.mkdir(dataDir, { recursive: true });
-  await fs.writeFile(submissionsFile, `${JSON.stringify(submissions.sort(byCreated), null, 2)}\n`);
+  await fs.writeFile(submissionsFile, `${JSON.stringify([...otherSubmissions, ...nextSubmissions], null, 2)}\n`);
 }
 
-async function readSubmissionsFromDatabase() {
+async function readSubmissionsFromDatabase(listType = defaultListType) {
   return withDatabase(async (connection) => {
     const [rows] = await connection.execute(
-      "SELECT `id`, `name`, `tier`, `region`, `role`, `clan`, `playfab_id`, `notes`, `status`, `created_at` FROM `submissions` ORDER BY `created_at` ASC, `name` ASC"
+      "SELECT `id`, `list_type`, `name`, `tier`, `region`, `role`, `clan`, `playfab_id`, `notes`, `status`, `created_at` FROM `submissions` WHERE `list_type` = ? ORDER BY `created_at` ASC, `name` ASC",
+      [normalizeListType(listType)]
     );
     return rows.map(rowToSubmission);
   });
@@ -364,9 +414,10 @@ async function saveSubmissionToDatabase(submission) {
   return withDatabase(async (connection) => {
     const normalized = normalizeSubmission(submission);
     await connection.execute(
-      `INSERT INTO \`submissions\` (\`id\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`playfab_id\`, \`notes\`, \`status\`)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO \`submissions\` (\`id\`, \`list_type\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`playfab_id\`, \`notes\`, \`status\`)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
+         \`list_type\` = VALUES(\`list_type\`),
          \`name\` = VALUES(\`name\`),
          \`tier\` = VALUES(\`tier\`),
          \`region\` = VALUES(\`region\`),
@@ -377,6 +428,7 @@ async function saveSubmissionToDatabase(submission) {
          \`status\` = VALUES(\`status\`)`,
       [
         normalized.id,
+        normalized.listType,
         normalized.name,
         normalized.tier,
         normalized.region,
@@ -392,17 +444,19 @@ async function saveSubmissionToDatabase(submission) {
   });
 }
 
-async function writeSubmissionsToDatabase(submissions) {
+async function writeSubmissionsToDatabase(submissions, listType = defaultListType) {
   return withDatabase(async (connection) => {
+    const normalizedListType = normalizeListType(listType);
     await connection.beginTransaction();
     try {
-      await connection.execute("DELETE FROM `submissions`");
+      await connection.execute("DELETE FROM `submissions` WHERE `list_type` = ?", [normalizedListType]);
       for (const submission of submissions.map((item) => normalizeSubmission(item)).sort(byCreated)) {
         await connection.execute(
-          `INSERT INTO \`submissions\` (\`id\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`playfab_id\`, \`notes\`, \`status\`)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO \`submissions\` (\`id\`, \`list_type\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`playfab_id\`, \`notes\`, \`status\`)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             submission.id,
+            normalizedListType,
             submission.name,
             submission.tier,
             submission.region,
@@ -422,15 +476,18 @@ async function writeSubmissionsToDatabase(submissions) {
   });
 }
 
-async function readPlayersFromDatabase() {
+async function readPlayersFromDatabase(listType = defaultListType) {
   return withDatabase(async (connection) => {
+    const normalizedListType = normalizeListType(listType);
     const [rows] = await connection.execute(
-      "SELECT `id`, `name`, `tier`, `region`, `role`, `clan`, `playfab_id`, `notes`, `sort_order` FROM `players` ORDER BY `sort_order` ASC, `name` ASC"
+      "SELECT `id`, `list_type`, `name`, `tier`, `region`, `role`, `clan`, `playfab_id`, `notes`, `sort_order` FROM `players` WHERE `list_type` = ? ORDER BY `sort_order` ASC, `name` ASC",
+      [normalizedListType]
     );
     if (rows.length) return rows.map(rowToPlayer);
 
-    const seededPlayers = await readPlayersFromFile();
-    await writePlayersToDatabase(seededPlayers);
+    if (normalizedListType !== defaultListType) return [];
+    const seededPlayers = await readPlayersFromFile(defaultListType);
+    await writePlayersToDatabase(seededPlayers, defaultListType);
     return seededPlayers;
   });
 }
@@ -439,9 +496,10 @@ async function savePlayerToDatabase(player) {
   return withDatabase(async (connection) => {
     const normalized = normalizePlayer(player);
     await connection.execute(
-      `INSERT INTO \`players\` (\`id\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`playfab_id\`, \`notes\`, \`sort_order\`)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO \`players\` (\`id\`, \`list_type\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`playfab_id\`, \`notes\`, \`sort_order\`)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
+         \`list_type\` = VALUES(\`list_type\`),
          \`name\` = VALUES(\`name\`),
          \`tier\` = VALUES(\`tier\`),
          \`region\` = VALUES(\`region\`),
@@ -452,6 +510,7 @@ async function savePlayerToDatabase(player) {
          \`sort_order\` = VALUES(\`sort_order\`)`,
       [
         normalized.id,
+        normalized.listType,
         normalized.name,
         normalized.tier,
         normalized.region,
@@ -469,7 +528,7 @@ async function savePlayerToDatabase(player) {
     ]);
 
     const [rows] = await connection.execute(
-      "SELECT `id`, `name`, `tier`, `region`, `role`, `clan`, `playfab_id`, `notes`, `sort_order` FROM `players` WHERE `id` = ? LIMIT 1",
+      "SELECT `id`, `list_type`, `name`, `tier`, `region`, `role`, `clan`, `playfab_id`, `notes`, `sort_order` FROM `players` WHERE `id` = ? LIMIT 1",
       [normalized.id]
     );
     const saved = rows.length ? rowToPlayer(rows[0]) : normalized;
@@ -488,18 +547,20 @@ async function deletePlayerFromDatabase(id) {
   });
 }
 
-async function writePlayersToDatabase(players) {
+async function writePlayersToDatabase(players, listType = defaultListType) {
   return withDatabase(async (connection) => {
-    const sortedPlayers = players.map((player) => normalizePlayer(player)).sort(byOrder);
+    const normalizedListType = normalizeListType(listType);
+    const sortedPlayers = players.map((player) => normalizePlayer({ ...player, listType: normalizedListType })).sort(byOrder);
     await connection.beginTransaction();
     try {
-      await connection.execute("DELETE FROM `players`");
+      await connection.execute("DELETE FROM `players` WHERE `list_type` = ?", [normalizedListType]);
       for (const player of sortedPlayers) {
         await connection.execute(
-          `INSERT INTO \`players\` (\`id\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`playfab_id\`, \`notes\`, \`sort_order\`)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO \`players\` (\`id\`, \`list_type\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`playfab_id\`, \`notes\`, \`sort_order\`)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             player.id,
+            normalizedListType,
             player.name,
             player.tier,
             player.region,
@@ -527,13 +588,97 @@ function byCreated(a, b) {
   return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.name.localeCompare(b.name);
 }
 
+function requestListType(request) {
+  return normalizeListType(request.query.listType || request.body?.listType || request.body?.list_type);
+}
+
+async function readRegions() {
+  if (hasDatabase()) {
+    return withDatabase(async (connection) => {
+      const [rows] = await connection.execute("SELECT `name` FROM `regions` ORDER BY `sort_order` ASC, `name` ASC");
+      return rows.map((row) => row.name);
+    });
+  }
+
+  try {
+    const raw = await fs.readFile(regionsFile, "utf8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length ? parsed.map((region) => cleanText(region, 24)).filter(Boolean) : defaultRegions;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    return defaultRegions;
+  }
+}
+
+async function writeRegions(regions) {
+  const nextRegions = [...new Set(regions.map((region) => cleanText(region, 24)).filter(Boolean))].sort();
+  if (hasDatabase()) {
+    return withDatabase(async (connection) => {
+      await connection.beginTransaction();
+      try {
+        await connection.execute("DELETE FROM `regions`");
+        for (const [index, region] of nextRegions.entries()) {
+          await connection.execute("INSERT INTO `regions` (`name`, `sort_order`) VALUES (?, ?)", [region, index + 1]);
+        }
+        await connection.commit();
+        return nextRegions;
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      }
+    });
+  }
+
+  await fs.mkdir(dataDir, { recursive: true });
+  await fs.writeFile(regionsFile, `${JSON.stringify(nextRegions, null, 2)}\n`);
+  return nextRegions;
+}
+
+async function ensureRegionAllowed(region) {
+  if (!region) return "";
+  const regions = await readRegions();
+  return regions.includes(region) ? region : "";
+}
+
 app.get("/api/config", (_request, response) => {
-  response.json({ tiers });
+  response.json({ tiers, listTypes });
 });
 
-app.get("/api/players", async (_request, response, next) => {
+app.get("/api/regions", async (_request, response, next) => {
   try {
-    response.json(await readPlayers());
+    response.json(await readRegions());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/regions", requireAdmin, async (request, response, next) => {
+  try {
+    const region = cleanText(request.body?.name, 24);
+    if (!region) {
+      response.status(400).json({ error: "Region name is required." });
+      return;
+    }
+    const regions = await readRegions();
+    response.status(201).json(await writeRegions([...regions, region]));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/regions/:name", requireAdmin, async (request, response, next) => {
+  try {
+    const region = cleanText(request.params.name, 24);
+    const regions = await readRegions();
+    response.json(await writeRegions(regions.filter((item) => item !== region)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/players", async (request, response, next) => {
+  try {
+    response.json(await readPlayers(requestListType(request)));
   } catch (error) {
     next(error);
   }
@@ -571,9 +716,12 @@ app.post("/api/logout", (_request, response) => {
 
 app.post("/api/players", requireAdmin, async (request, response, next) => {
   try {
-    const players = await readPlayers();
+    const listType = requestListType(request);
+    const players = await readPlayers(listType);
     const nextPlayer = normalizePlayer({
       ...request.body,
+      listType,
+      region: await ensureRegionAllowed(request.body?.region),
       order: players.length ? Math.max(...players.map((player) => player.order)) + 1 : 1
     });
 
@@ -588,7 +736,7 @@ app.post("/api/players", requireAdmin, async (request, response, next) => {
     }
 
     players.push(nextPlayer);
-    await writePlayers(players);
+    await writePlayers(players, listType);
     response.status(201).json(nextPlayer);
   } catch (error) {
     next(error);
@@ -597,14 +745,15 @@ app.post("/api/players", requireAdmin, async (request, response, next) => {
 
 app.put("/api/players/:id", requireAdmin, async (request, response, next) => {
   try {
-    const players = await readPlayers();
+    const listType = requestListType(request);
+    const players = await readPlayers(listType);
     const existing = players.find((player) => player.id === request.params.id);
     if (!existing) {
       response.status(404).json({ error: "Player not found." });
       return;
     }
 
-    const updated = normalizePlayer(request.body, existing);
+    const updated = normalizePlayer({ ...request.body, listType, region: await ensureRegionAllowed(request.body?.region) }, existing);
     if (!updated.name) {
       response.status(400).json({ error: "Player name is required." });
       return;
@@ -616,7 +765,7 @@ app.put("/api/players/:id", requireAdmin, async (request, response, next) => {
     }
 
     const nextPlayers = players.map((player) => (player.id === existing.id ? updated : player));
-    await writePlayers(nextPlayers);
+    await writePlayers(nextPlayers, listType);
     response.json(updated);
   } catch (error) {
     next(error);
@@ -631,8 +780,9 @@ app.delete("/api/players/:id", requireAdmin, async (request, response, next) => 
       return;
     }
 
-    const players = await readPlayers();
-    await writePlayers(players.filter((player) => player.id !== request.params.id));
+    const listType = requestListType(request);
+    const players = await readPlayers(listType);
+    await writePlayers(players.filter((player) => player.id !== request.params.id), listType);
     response.json({ ok: true });
   } catch (error) {
     next(error);
@@ -641,7 +791,8 @@ app.delete("/api/players/:id", requireAdmin, async (request, response, next) => 
 
 app.post("/api/players/reorder", requireAdmin, async (request, response, next) => {
   try {
-    const players = await readPlayers();
+    const listType = requestListType(request);
+    const players = await readPlayers(listType);
     const sorted = players.sort(byOrder);
     const currentIndex = sorted.findIndex((player) => player.id === request.body?.id);
     const targetIndex = request.body?.direction === "up" ? currentIndex - 1 : currentIndex + 1;
@@ -652,7 +803,7 @@ app.post("/api/players/reorder", requireAdmin, async (request, response, next) =
     }
 
     [sorted[currentIndex].order, sorted[targetIndex].order] = [sorted[targetIndex].order, sorted[currentIndex].order];
-    await writePlayers(sorted);
+    await writePlayers(sorted, listType);
     response.json(sorted);
   } catch (error) {
     next(error);
@@ -661,10 +812,11 @@ app.post("/api/players/reorder", requireAdmin, async (request, response, next) =
 
 app.post("/api/players/import", requireAdmin, async (request, response, next) => {
   try {
+    const listType = requestListType(request);
     const nextPlayers = Array.isArray(request.body?.players)
-      ? request.body.players.map((player, index) => normalizePlayer({ ...player, order: index + 1 }))
+      ? request.body.players.map((player, index) => normalizePlayer({ ...player, listType, order: index + 1 }))
       : [];
-    await writePlayers(nextPlayers);
+    await writePlayers(nextPlayers, listType);
     response.json(nextPlayers);
   } catch (error) {
     next(error);
@@ -673,8 +825,11 @@ app.post("/api/players/import", requireAdmin, async (request, response, next) =>
 
 app.post("/api/submissions", async (request, response, next) => {
   try {
+    const listType = requestListType(request);
     const submission = normalizeSubmission({
       ...request.body,
+      listType,
+      region: await ensureRegionAllowed(request.body?.region),
       id: crypto.randomUUID(),
       status: "pending",
       createdAt: new Date().toISOString()
@@ -690,18 +845,18 @@ app.post("/api/submissions", async (request, response, next) => {
       return;
     }
 
-    const submissions = await readSubmissions();
+    const submissions = await readSubmissions(listType);
     submissions.push(submission);
-    await writeSubmissions(submissions);
+    await writeSubmissions(submissions, listType);
     response.status(201).json(submission);
   } catch (error) {
     next(error);
   }
 });
 
-app.get("/api/submissions", requireAdmin, async (_request, response, next) => {
+app.get("/api/submissions", requireAdmin, async (request, response, next) => {
   try {
-    const submissions = await readSubmissions();
+    const submissions = await readSubmissions(requestListType(request));
     response.json(submissions.filter((submission) => submission.status === "pending"));
   } catch (error) {
     next(error);
@@ -710,16 +865,18 @@ app.get("/api/submissions", requireAdmin, async (_request, response, next) => {
 
 app.post("/api/submissions/:id/approve", requireAdmin, async (request, response, next) => {
   try {
-    const submissions = await readSubmissions();
+    const listType = requestListType(request);
+    const submissions = await readSubmissions(listType);
     const submission = submissions.find((item) => item.id === request.params.id);
     if (!submission) {
       response.status(404).json({ error: "Submission not found." });
       return;
     }
 
-    const players = await readPlayers();
+    const players = await readPlayers(listType);
     const approvedPlayer = normalizePlayer({
       ...submission,
+      listType,
       id: crypto.randomUUID(),
       order: players.length ? Math.max(...players.map((player) => player.order)) + 1 : 1
     });
@@ -732,8 +889,8 @@ app.post("/api/submissions/:id/approve", requireAdmin, async (request, response,
     }
 
     players.push(approvedPlayer);
-    await writePlayers(players);
-    await writeSubmissions(submissions.map((item) => (item.id === submission.id ? { ...item, status: "approved" } : item)));
+    await writePlayers(players, listType);
+    await writeSubmissions(submissions.map((item) => (item.id === submission.id ? { ...item, status: "approved" } : item)), listType);
     response.json({ player: approvedPlayer });
   } catch (error) {
     next(error);
@@ -742,7 +899,8 @@ app.post("/api/submissions/:id/approve", requireAdmin, async (request, response,
 
 app.post("/api/submissions/:id/reject", requireAdmin, async (request, response, next) => {
   try {
-    const submissions = await readSubmissions();
+    const listType = requestListType(request);
+    const submissions = await readSubmissions(listType);
     const submission = submissions.find((item) => item.id === request.params.id);
     if (!submission) {
       response.status(404).json({ error: "Submission not found." });
@@ -755,7 +913,7 @@ app.post("/api/submissions/:id/reject", requireAdmin, async (request, response, 
       return;
     }
 
-    await writeSubmissions(submissions.map((item) => (item.id === submission.id ? { ...item, status: "rejected" } : item)));
+    await writeSubmissions(submissions.map((item) => (item.id === submission.id ? { ...item, status: "rejected" } : item)), listType);
     response.json({ ok: true });
   } catch (error) {
     next(error);
@@ -764,12 +922,14 @@ app.post("/api/submissions/:id/reject", requireAdmin, async (request, response, 
 
 app.post("/api/players/reset", requireAdmin, async (_request, response, next) => {
   try {
+    const listType = requestListType(_request);
     const nextPlayers = starterPlayers.map((player, index) => ({
       ...player,
+      listType,
       id: `demo-${player.name.toLowerCase().replaceAll(" ", "-")}`,
       order: index + 1
     }));
-    await writePlayers(nextPlayers);
+    await writePlayers(nextPlayers, listType);
     response.json(nextPlayers);
   } catch (error) {
     next(error);
