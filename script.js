@@ -36,6 +36,7 @@ const submissionModal = document.querySelector("#submissionModal");
 const submissionForm = document.querySelector("#submissionForm");
 const submissionName = document.querySelector("#submissionName");
 const submissionPlayfabId = document.querySelector("#submissionPlayfabId");
+const submissionDiscordUsername = document.querySelector("#submissionDiscordUsername");
 const submissionTier = document.querySelector("#submissionTier");
 const submissionRegion = document.querySelector("#submissionRegion");
 const submissionRole = document.querySelector("#submissionRole");
@@ -47,6 +48,7 @@ const updateRequestForm = document.querySelector("#updateRequestForm");
 const updateRequestPlayerId = document.querySelector("#updateRequestPlayerId");
 const updateRequestName = document.querySelector("#updateRequestName");
 const updateRequestPlayfabId = document.querySelector("#updateRequestPlayfabId");
+const updateRequestDiscordUsername = document.querySelector("#updateRequestDiscordUsername");
 const updateRequestTier = document.querySelector("#updateRequestTier");
 const updateRequestRegion = document.querySelector("#updateRequestRegion");
 const updateRequestRole = document.querySelector("#updateRequestRole");
@@ -254,6 +256,7 @@ function showUpdateRequestModal(player) {
   updateRequestPlayerId.value = player.id;
   updateRequestName.value = player.name || "";
   updateRequestPlayfabId.value = player.playfabId || "";
+  updateRequestDiscordUsername.value = player.discordUsername || "";
   updateRequestTier.value = allowedSubmissionTiers.some((tier) => tier.id === player.tier) ? player.tier : allowedSubmissionTiers[1]?.id || "b";
   updateRequestRegion.value = regions.includes(player.region) ? player.region : "";
   updateRequestRole.value = player.role || "";
@@ -309,6 +312,8 @@ submissionForm.addEventListener("submit", async (event) => {
         name: submissionName.value.trim(),
         playfabId: submissionPlayfabId.value.trim(),
         playfab_id: submissionPlayfabId.value.trim(),
+        discordUsername: submissionDiscordUsername.value.trim(),
+        discord_username: submissionDiscordUsername.value.trim(),
         tier: submissionTier.value,
         region: submissionRegion.value.trim(),
         role: submissionRole.value.trim(),
@@ -331,6 +336,7 @@ updateRequestForm.addEventListener("submit", async (event) => {
 
   try {
     const playfabValue = updateRequestPlayfabId.value.trim();
+    const discordValue = updateRequestDiscordUsername.value.trim();
     await api("/api/update-requests", {
       method: "POST",
       body: JSON.stringify({
@@ -340,6 +346,8 @@ updateRequestForm.addEventListener("submit", async (event) => {
         name: updateRequestName.value.trim(),
         playfabId: playfabValue,
         playfab_id: playfabValue,
+        discordUsername: discordValue,
+        discord_username: discordValue,
         tier: updateRequestTier.value,
         region: updateRequestRegion.value.trim(),
         role: updateRequestRole.value.trim(),
