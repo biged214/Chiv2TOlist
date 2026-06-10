@@ -142,12 +142,13 @@ function renderSubmissions() {
 
   submissions.forEach((submission) => {
     const tier = tiers.find((item) => item.id === submission.tier);
+    const isUpdateRequest = submission.requestType === "update";
     const item = document.createElement("article");
     item.className = "submission-item";
     item.innerHTML = `
       <div>
         <strong>${escapeHtml(submission.name)}</strong>
-        <span>${escapeHtml(tier?.label || submission.tier)} tier - ${escapeHtml(submission.region || "Unknown region")} - ${escapeHtml(submission.role || "Flexible")}${submission.playfabId ? " - PlayFab included" : ""}</span>
+        <span>${isUpdateRequest ? "Update request" : "New submission"} - ${escapeHtml(tier?.label || submission.tier)} tier - ${escapeHtml(submission.region || "Unknown region")} - ${escapeHtml(submission.role || "Flexible")}${submission.playfabId ? " - PlayFab included" : ""}</span>
         <p>${escapeHtml(submission.notes || "No notes included.")}</p>
       </div>
       <div class="admin-actions">
