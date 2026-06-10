@@ -22,6 +22,11 @@ const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path
 const playersFile = path.join(dataDir, "players.json");
 const submissionsFile = path.join(dataDir, "submissions.json");
 const regionsFile = path.join(dataDir, "regions.json");
+const discordWebhooks = {
+  approved: process.env.DISCORD_WEBHOOK_NEWAPPROVE,
+  newSubmission: process.env.DISCORD_WEBHOOK_NEWSUB,
+  updateRequest: process.env.DISCORD_WEBHOOK_UPDATEREQ
+};
 function hasDatabase() {
   return Boolean(process.env.DB_HOST && process.env.DB_NAME && process.env.DB_USER);
 }
@@ -138,6 +143,79 @@ function firstDefined(...values) {
 
 function cleanText(value, maxLength) {
   return String(value ?? "").trim().slice(0, maxLength);
+}
+
+function tierLabel(tierId) {
+  return tiers.find((tier) => tier.id === tierId)?.label || tierId || "Unknown";
+}
+
+function listLabel(listType) {
+  return listTypes.find((item) => item.id === listType)?.label || listType || "Team Objective";
+}
+
+function discordField(name, value, inline = true) {
+  return { name, value: cleanText(value || "Not provided", 1024) || "Not provided", inline };
+}
+
+async function notifyDiscord(webhookUrl, payload) {
+  if (!webhookUrl) return;
+
+  try {
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      console.error(`Discord webhook failed with ${response.status}`);
+    }
+  } catch (error) {
+    console.error("Discord webhook failed:", error.message);
+  }
+}
+
+function submissionEmbed(submission, title, color) {
+  return {
+    title,
+    color,
+    fields: [
+      discordField("Player", submission.name),
+      discordField("List", listLabel(submission.listType)),
+      discordField("Tier", tierLabel(submission.tier)),
+      discordField("Region", submission.region || "Unknown"),
+      discordField("Role", submission.role || "Flexible"),
+      discordField("Clan", submission.clan || "None"),
+      discordField("PlayFab ID", submission.playfabId || "Not provided", false),
+      discordField("Notes", submission.notes || "No notes included.", false)
+    ],
+    timestamp: new Date().toISOString()
+  };
+}
+
+async function notifyNewSubmission(submission) {
+  await notifyDiscord(discordWebhooks.newSubmission, {
+    username: "Chiv Tier List",
+    embeds: [submissionEmbed(submission, "New Player Submission", 0xc8953e)]
+  });
+}
+
+async function notifyUpdateRequest(submission, existingPlayer) {
+  const embed = submissionEmbed(submission, `Update Request: ${submission.name}`, 0x536673);
+  embed.fields.unshift(discordField("Current Record", existingPlayer?.name || submission.name, false));
+  await notifyDiscord(discordWebhooks.updateRequest, {
+    username: "Chiv Tier List",
+    embeds: [embed]
+  });
+}
+
+async function notifyApproval(submission, player) {
+  const title = submission.requestType === "update" ? "Update Request Approved" : "Submission Approved";
+  const embed = submissionEmbed({ ...submission, ...player }, title, 0x50683e);
+  await notifyDiscord(discordWebhooks.approved, {
+    username: "Chiv Tier List",
+    embeds: [embed]
+  });
 }
 
 function normalizeListType(value) {
@@ -282,6 +360,8 @@ async function ensureSubmissionsTable(connection) {
       \`playfab_id\` VARCHAR(64) DEFAULT '',
       \`notes\` VARCHAR(180) DEFAULT '',
       \`status\` VARCHAR(20) NOT NULL DEFAULT 'pending',
+      \`request_type\` VARCHAR(20) NOT NULL DEFAULT 'new',
+      \`target_player_id\` VARCHAR(80) DEFAULT '',
       \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
@@ -298,7 +378,9 @@ async function ensureSubmissionsTable(connection) {
     ["playfab_id", "VARCHAR(64) DEFAULT '' AFTER `clan`"],
     ["notes", "VARCHAR(180) DEFAULT '' AFTER `playfab_id`"],
     ["status", "VARCHAR(20) NOT NULL DEFAULT 'pending' AFTER `notes`"],
-    ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER `status`"],
+    ["request_type", "VARCHAR(20) NOT NULL DEFAULT 'new' AFTER `status`"],
+    ["target_player_id", "VARCHAR(80) DEFAULT '' AFTER `request_type`"],
+    ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER `target_player_id`"],
     ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER `created_at`"]
   ];
 
@@ -343,9 +425,12 @@ function rowToPlayer(row) {
 function normalizeSubmission(input = {}, fallback = {}) {
   const player = normalizePlayer(input, fallback);
   const status = cleanText(firstDefined(input.status, fallback.status, "pending"), 20);
+  const requestType = cleanText(firstDefined(input.requestType, input.request_type, fallback.requestType, fallback.request_type, "new"), 20);
   return {
     ...player,
     status: ["pending", "approved", "rejected"].includes(status) ? status : "pending",
+    requestType: ["new", "update"].includes(requestType) ? requestType : "new",
+    targetPlayerId: cleanText(firstDefined(input.targetPlayerId, input.target_player_id, fallback.targetPlayerId, fallback.target_player_id), 80),
     createdAt: firstDefined(input.createdAt, input.created_at, fallback.createdAt, fallback.created_at, new Date().toISOString())
   };
 }
@@ -362,6 +447,8 @@ function rowToSubmission(row) {
     playfabId: row.playfab_id,
     notes: row.notes,
     status: row.status,
+    requestType: row.request_type,
+    targetPlayerId: row.target_player_id,
     createdAt: row.created_at
   });
 }
@@ -403,7 +490,7 @@ async function writeSubmissions(submissions, listType = defaultListType) {
 async function readSubmissionsFromDatabase(listType = defaultListType) {
   return withDatabase(async (connection) => {
     const [rows] = await connection.execute(
-      "SELECT `id`, `list_type`, `name`, `tier`, `region`, `role`, `clan`, `playfab_id`, `notes`, `status`, `created_at` FROM `submissions` WHERE `list_type` = ? ORDER BY `created_at` ASC, `name` ASC",
+      "SELECT `id`, `list_type`, `name`, `tier`, `region`, `role`, `clan`, `playfab_id`, `notes`, `status`, `request_type`, `target_player_id`, `created_at` FROM `submissions` WHERE `list_type` = ? ORDER BY `created_at` ASC, `name` ASC",
       [normalizeListType(listType)]
     );
     return rows.map(rowToSubmission);
@@ -414,8 +501,8 @@ async function saveSubmissionToDatabase(submission) {
   return withDatabase(async (connection) => {
     const normalized = normalizeSubmission(submission);
     await connection.execute(
-      `INSERT INTO \`submissions\` (\`id\`, \`list_type\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`playfab_id\`, \`notes\`, \`status\`)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO \`submissions\` (\`id\`, \`list_type\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`playfab_id\`, \`notes\`, \`status\`, \`request_type\`, \`target_player_id\`)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
          \`list_type\` = VALUES(\`list_type\`),
          \`name\` = VALUES(\`name\`),
@@ -425,7 +512,9 @@ async function saveSubmissionToDatabase(submission) {
          \`clan\` = VALUES(\`clan\`),
          \`playfab_id\` = VALUES(\`playfab_id\`),
          \`notes\` = VALUES(\`notes\`),
-         \`status\` = VALUES(\`status\`)`,
+         \`status\` = VALUES(\`status\`),
+         \`request_type\` = VALUES(\`request_type\`),
+         \`target_player_id\` = VALUES(\`target_player_id\`)`,
       [
         normalized.id,
         normalized.listType,
@@ -436,7 +525,9 @@ async function saveSubmissionToDatabase(submission) {
         normalized.clan,
         normalized.playfabId,
         normalized.notes,
-        normalized.status
+        normalized.status,
+        normalized.requestType,
+        normalized.targetPlayerId
       ]
     );
 
@@ -452,8 +543,8 @@ async function writeSubmissionsToDatabase(submissions, listType = defaultListTyp
       await connection.execute("DELETE FROM `submissions` WHERE `list_type` = ?", [normalizedListType]);
       for (const submission of submissions.map((item) => normalizeSubmission(item)).sort(byCreated)) {
         await connection.execute(
-          `INSERT INTO \`submissions\` (\`id\`, \`list_type\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`playfab_id\`, \`notes\`, \`status\`)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO \`submissions\` (\`id\`, \`list_type\`, \`name\`, \`tier\`, \`region\`, \`role\`, \`clan\`, \`playfab_id\`, \`notes\`, \`status\`, \`request_type\`, \`target_player_id\`)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             submission.id,
             normalizedListType,
@@ -464,7 +555,9 @@ async function writeSubmissionsToDatabase(submissions, listType = defaultListTyp
             submission.clan,
             submission.playfabId,
             submission.notes,
-            submission.status
+            submission.status,
+            submission.requestType,
+            submission.targetPlayerId
           ]
         );
       }
@@ -832,6 +925,7 @@ app.post("/api/submissions", async (request, response, next) => {
       region: await ensureRegionAllowed(request.body?.region),
       id: crypto.randomUUID(),
       status: "pending",
+      requestType: "new",
       createdAt: new Date().toISOString()
     });
 
@@ -841,13 +935,63 @@ app.post("/api/submissions", async (request, response, next) => {
     }
 
     if (hasDatabase()) {
-      response.status(201).json(await saveSubmissionToDatabase(submission));
+      const saved = await saveSubmissionToDatabase(submission);
+      await notifyNewSubmission(saved);
+      response.status(201).json(saved);
       return;
     }
 
     const submissions = await readSubmissions(listType);
     submissions.push(submission);
     await writeSubmissions(submissions, listType);
+    await notifyNewSubmission(submission);
+    response.status(201).json(submission);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/update-requests", async (request, response, next) => {
+  try {
+    const listType = requestListType(request);
+    const targetPlayerId = cleanText(request.body?.targetPlayerId || request.body?.target_player_id, 80);
+    const players = await readPlayers(listType);
+    const existingPlayer = players.find((player) => player.id === targetPlayerId);
+    if (!existingPlayer) {
+      response.status(404).json({ error: "Player record not found." });
+      return;
+    }
+
+    const submission = normalizeSubmission(
+      {
+        ...request.body,
+        listType,
+        region: await ensureRegionAllowed(request.body?.region),
+        id: crypto.randomUUID(),
+        status: "pending",
+        requestType: "update",
+        targetPlayerId,
+        createdAt: new Date().toISOString()
+      },
+      existingPlayer
+    );
+
+    if (!submission.name) {
+      response.status(400).json({ error: "Player name is required." });
+      return;
+    }
+
+    if (hasDatabase()) {
+      const saved = await saveSubmissionToDatabase(submission);
+      await notifyUpdateRequest(saved, existingPlayer);
+      response.status(201).json(saved);
+      return;
+    }
+
+    const submissions = await readSubmissions(listType);
+    submissions.push(submission);
+    await writeSubmissions(submissions, listType);
+    await notifyUpdateRequest(submission, existingPlayer);
     response.status(201).json(submission);
   } catch (error) {
     next(error);
@@ -874,23 +1018,39 @@ app.post("/api/submissions/:id/approve", requireAdmin, async (request, response,
     }
 
     const players = await readPlayers(listType);
-    const approvedPlayer = normalizePlayer({
-      ...submission,
-      listType,
-      id: crypto.randomUUID(),
-      order: players.length ? Math.max(...players.map((player) => player.order)) + 1 : 1
-    });
+    const existingPlayer = submission.requestType === "update"
+      ? players.find((player) => player.id === submission.targetPlayerId)
+      : null;
+
+    if (submission.requestType === "update" && !existingPlayer) {
+      response.status(404).json({ error: "Original player record was not found." });
+      return;
+    }
+
+    const approvedPlayer = normalizePlayer(
+      {
+        ...submission,
+        listType,
+        id: existingPlayer?.id || crypto.randomUUID(),
+        order: existingPlayer?.order || (players.length ? Math.max(...players.map((player) => player.order)) + 1 : 1)
+      },
+      existingPlayer || {}
+    );
 
     if (hasDatabase()) {
       await savePlayerToDatabase(approvedPlayer);
       await saveSubmissionToDatabase({ ...submission, status: "approved" });
+      await notifyApproval(submission, approvedPlayer);
       response.json({ player: approvedPlayer });
       return;
     }
 
-    players.push(approvedPlayer);
-    await writePlayers(players, listType);
+    const nextPlayers = existingPlayer
+      ? players.map((player) => (player.id === existingPlayer.id ? approvedPlayer : player))
+      : [...players, approvedPlayer];
+    await writePlayers(nextPlayers, listType);
     await writeSubmissions(submissions.map((item) => (item.id === submission.id ? { ...item, status: "approved" } : item)), listType);
+    await notifyApproval(submission, approvedPlayer);
     response.json({ player: approvedPlayer });
   } catch (error) {
     next(error);
