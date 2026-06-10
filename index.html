@@ -14,6 +14,7 @@
         <div class="topbar__actions">
           <a class="button button--ghost" href="/">Team Objective</a>
           <a class="button button--ghost" href="/ranked-duelists">Ranked Duelists</a>
+          <a class="button button--ghost" href="https://discord.gg/7MmJHwCGd" target="_blank" rel="noopener noreferrer">Discord</a>
         </div>
       </nav>
       <section class="hero__content">
@@ -80,6 +81,10 @@
             <input id="submissionPlayfabId" maxlength="64" placeholder="EFEA435B1E22C73C">
           </label>
           <label>
+            <span>Discord username</span>
+            <input id="submissionDiscordUsername" maxlength="64" placeholder="username or display name">
+          </label>
+          <label>
             <span>Suggested tier</span>
             <select id="submissionTier"></select>
           </label>
@@ -131,6 +136,10 @@
             <input id="updateRequestPlayfabId" maxlength="64" placeholder="EFEA435B1E22C73C">
           </label>
           <label>
+            <span>Discord username</span>
+            <input id="updateRequestDiscordUsername" maxlength="64" placeholder="username or display name">
+          </label>
+          <label>
             <span>Suggested tier</span>
             <select id="updateRequestTier"></select>
           </label>
@@ -172,6 +181,6 @@
       </article>
     </template>
 
-    <script src="script.js?v=public-tier-filter-20260610"></script>
+    <script src="script.js?v=discord-field-20260610"></script>
   </body>
 </html>
