@@ -79,6 +79,7 @@ textarea {
 
 .topbar__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: center;
 }
@@ -311,23 +312,36 @@ textarea {
 }
 
 .player-card {
-  min-height: 150px;
-  padding: 14px;
+  min-height: 0;
+  padding: 0;
   border: 1px solid #e4d7c5;
   border-radius: 8px;
   background: #fffdf8;
+  overflow: hidden;
 }
 
-.player-card__top {
+.player-card__toggle {
   display: flex;
+  width: 100%;
   justify-content: space-between;
   gap: 10px;
-  align-items: start;
+  align-items: center;
+  padding: 12px;
+  border: 0;
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
 }
 
 .player-card h3 {
   margin: 0;
   font-size: 1rem;
+}
+
+.player-card__details {
+  padding: 0 12px 12px;
+  border-top: 1px solid #eadfce;
 }
 
 .badge {
@@ -370,6 +384,10 @@ textarea {
   color: #39332e;
   font-size: 0.9rem;
   line-height: 1.5;
+}
+
+.player-card__toggle:hover h3 {
+  color: var(--accent);
 }
 
 .stats-link {
@@ -423,6 +441,54 @@ textarea {
   grid-template-columns: minmax(220px, 1fr) auto;
   gap: 12px;
   align-items: end;
+}
+
+.admin-tools {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.7fr) minmax(260px, 1fr);
+  gap: 14px;
+  align-items: end;
+  margin-bottom: 18px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.region-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.region-list {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.region-chip {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fffdf8;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.region-chip button {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: #fff7e7;
+  background: var(--red);
+  cursor: pointer;
 }
 
 .hint {
@@ -585,6 +651,8 @@ textarea {
   .toolbar,
   .submission-callout,
   .submission-form,
+  .admin-tools,
+  .region-form,
   .tier-row,
   .admin-lock,
   .player-form,
