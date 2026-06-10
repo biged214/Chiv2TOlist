@@ -11,6 +11,8 @@ const tierBoard = document.querySelector("#tier-list");
 const tierFilter = document.querySelector("#tierFilter");
 const regionFilter = document.querySelector("#regionFilter");
 const searchInput = document.querySelector("#searchInput");
+const openSubmissionModal = document.querySelector("#openSubmissionModal");
+const submissionModal = document.querySelector("#submissionModal");
 const submissionForm = document.querySelector("#submissionForm");
 const submissionName = document.querySelector("#submissionName");
 const submissionPlayfabId = document.querySelector("#submissionPlayfabId");
@@ -168,8 +170,34 @@ function render() {
   renderTierBoard();
 }
 
+function showSubmissionModal() {
+  submissionModal.hidden = false;
+  document.body.classList.add("modal-open");
+  submissionName.focus();
+}
+
+function hideSubmissionModal() {
+  submissionModal.hidden = true;
+  document.body.classList.remove("modal-open");
+  openSubmissionModal.focus();
+}
+
 [tierFilter, regionFilter, searchInput].forEach((control) => {
   control.addEventListener("input", renderTierBoard);
+});
+
+openSubmissionModal.addEventListener("click", showSubmissionModal);
+
+submissionModal.addEventListener("click", (event) => {
+  if (event.target.closest("[data-close-submission]")) {
+    hideSubmissionModal();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !submissionModal.hidden) {
+    hideSubmissionModal();
+  }
 });
 
 submissionForm.addEventListener("submit", async (event) => {
