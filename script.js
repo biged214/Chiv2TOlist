@@ -41,6 +41,17 @@ const submissionRole = document.querySelector("#submissionRole");
 const submissionClan = document.querySelector("#submissionClan");
 const submissionNotes = document.querySelector("#submissionNotes");
 const submissionStatus = document.querySelector("#submissionStatus");
+const updateRequestModal = document.querySelector("#updateRequestModal");
+const updateRequestForm = document.querySelector("#updateRequestForm");
+const updateRequestPlayerId = document.querySelector("#updateRequestPlayerId");
+const updateRequestName = document.querySelector("#updateRequestName");
+const updateRequestPlayfabId = document.querySelector("#updateRequestPlayfabId");
+const updateRequestTier = document.querySelector("#updateRequestTier");
+const updateRequestRegion = document.querySelector("#updateRequestRegion");
+const updateRequestRole = document.querySelector("#updateRequestRole");
+const updateRequestClan = document.querySelector("#updateRequestClan");
+const updateRequestNotes = document.querySelector("#updateRequestNotes");
+const updateRequestStatus = document.querySelector("#updateRequestStatus");
 
 function escapeHtml(value) {
   return String(value)
@@ -102,24 +113,32 @@ function populateControls() {
   const selectedRegion = regionFilter.value;
   const selectedSubmissionTier = submissionTier.value;
   const selectedSubmissionRegion = submissionRegion.value;
+  const selectedUpdateTier = updateRequestTier.value;
+  const selectedUpdateRegion = updateRequestRegion.value;
 
   tierFilter.innerHTML = `<option value="all">All tiers</option>`;
   submissionTier.innerHTML = "";
+  updateRequestTier.innerHTML = "";
   tiers.forEach((tier) => {
     const label = tier.name ? `${tier.label} - ${tier.name}` : tier.label;
     tierFilter.append(new Option(label, tier.id));
     submissionTier.append(new Option(label, tier.id));
+    updateRequestTier.append(new Option(label, tier.id));
   });
   tierFilter.value = tiers.some((tier) => tier.id === selectedTier) ? selectedTier : "all";
   submissionTier.value = tiers.some((tier) => tier.id === selectedSubmissionTier) ? selectedSubmissionTier : tiers[2]?.id || "b";
+  updateRequestTier.value = tiers.some((tier) => tier.id === selectedUpdateTier) ? selectedUpdateTier : tiers[2]?.id || "b";
 
   regionFilter.innerHTML = `<option value="all">All regions</option>`;
   regions.forEach((region) => regionFilter.append(new Option(region, region)));
   regionFilter.value = regions.includes(selectedRegion) ? selectedRegion : "all";
 
   submissionRegion.innerHTML = `<option value="">Select region</option>`;
+  updateRequestRegion.innerHTML = `<option value="">Select region</option>`;
   regions.forEach((region) => submissionRegion.append(new Option(region, region)));
+  regions.forEach((region) => updateRequestRegion.append(new Option(region, region)));
   submissionRegion.value = regions.includes(selectedSubmissionRegion) ? selectedSubmissionRegion : "";
+  updateRequestRegion.value = regions.includes(selectedUpdateRegion) ? selectedUpdateRegion : "";
 }
 
 function renderTierBoard() {
@@ -176,6 +195,13 @@ function renderPlayerCard(player) {
   });
 
   card.querySelector("p").textContent = player.notes || "No notes yet.";
+  const actions = card.querySelector(".player-card__actions");
+  const requestButton = document.createElement("button");
+  requestButton.className = "text-button";
+  requestButton.type = "button";
+  requestButton.textContent = "Request update";
+  requestButton.addEventListener("click", () => showUpdateRequestModal(player));
+  actions.append(requestButton);
 
   if (player.playfabId) {
     const statsLink = document.createElement("a");
@@ -213,6 +239,26 @@ function hideSubmissionModal() {
   openSubmissionModal.focus();
 }
 
+function showUpdateRequestModal(player) {
+  updateRequestPlayerId.value = player.id;
+  updateRequestName.value = player.name || "";
+  updateRequestPlayfabId.value = player.playfabId || "";
+  updateRequestTier.value = tiers.some((tier) => tier.id === player.tier) ? player.tier : tiers[2]?.id || "b";
+  updateRequestRegion.value = regions.includes(player.region) ? player.region : "";
+  updateRequestRole.value = player.role || "";
+  updateRequestClan.value = player.clan || "";
+  updateRequestNotes.value = player.notes || "";
+  updateRequestStatus.textContent = "";
+  updateRequestModal.hidden = false;
+  document.body.classList.add("modal-open");
+  updateRequestName.focus();
+}
+
+function hideUpdateRequestModal() {
+  updateRequestModal.hidden = true;
+  document.body.classList.remove("modal-open");
+}
+
 [tierFilter, regionFilter, searchInput].forEach((control) => {
   control.addEventListener("input", renderTierBoard);
 });
@@ -225,9 +271,18 @@ submissionModal.addEventListener("click", (event) => {
   }
 });
 
+updateRequestModal.addEventListener("click", (event) => {
+  if (event.target.closest("[data-close-update-request]")) {
+    hideUpdateRequestModal();
+  }
+});
+
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !submissionModal.hidden) {
     hideSubmissionModal();
+  }
+  if (event.key === "Escape" && !updateRequestModal.hidden) {
+    hideUpdateRequestModal();
   }
 });
 
@@ -256,6 +311,35 @@ submissionForm.addEventListener("submit", async (event) => {
     submissionStatus.textContent = "Submission received. It will stay private until approved.";
   } catch (error) {
     submissionStatus.textContent = error.message;
+  }
+});
+
+updateRequestForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  updateRequestStatus.textContent = "Sending update request...";
+
+  try {
+    const playfabValue = updateRequestPlayfabId.value.trim();
+    await api("/api/update-requests", {
+      method: "POST",
+      body: JSON.stringify({
+        listType,
+        targetPlayerId: updateRequestPlayerId.value,
+        target_player_id: updateRequestPlayerId.value,
+        name: updateRequestName.value.trim(),
+        playfabId: playfabValue,
+        playfab_id: playfabValue,
+        tier: updateRequestTier.value,
+        region: updateRequestRegion.value.trim(),
+        role: updateRequestRole.value.trim(),
+        clan: updateRequestClan.value.trim(),
+        notes: updateRequestNotes.value.trim()
+      })
+    });
+
+    updateRequestStatus.textContent = "Update request received. It will stay private until approved.";
+  } catch (error) {
+    updateRequestStatus.textContent = error.message;
   }
 });
 
