@@ -56,6 +56,12 @@ const steamConfig = {
 let steamClientPromise;
 let playfabSessionPromise;
 let cachedPlayfabSession;
+let playfabWarmupStatus = {
+  state: "idle",
+  message: "",
+  playfabStage: "",
+  updatedAt: ""
+};
 function hasDatabase() {
   return Boolean(process.env.DB_HOST && process.env.DB_NAME && process.env.DB_USER);
 }
@@ -901,7 +907,8 @@ function playfabConfigStatus() {
     steamLogin: hasPasswordLogin,
     steamRefreshToken: hasRefreshLogin,
     steamAppId: steamConfig.appId || null,
-    missing
+    missing,
+    warmupStatus: playfabWarmupStatus
   };
 }
 
@@ -917,6 +924,14 @@ function playfabServiceError(message, statusCode = 502, playfabStage = "lookup")
   return Object.assign(new Error(message), { statusCode, playfabStage });
 }
 
+function fetchTimeoutSignal(milliseconds = 20000) {
+  if (AbortSignal.timeout) return AbortSignal.timeout(milliseconds);
+
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), milliseconds);
+  return controller.signal;
+}
+
 function playfabSessionMaxAgeMs() {
   return Math.max(15, Number.isFinite(playfabConfig.sessionMinutes) ? playfabConfig.sessionMinutes : 120) * 60 * 1000;
 }
@@ -926,6 +941,15 @@ function hasReadyPlayfabSession() {
     playfabConfig.sessionTicket ||
       (cachedPlayfabSession?.sessionTicket && cachedPlayfabSession.expiresAt > Date.now() + 60000)
   );
+}
+
+function updatePlayfabWarmupStatus(nextStatus) {
+  playfabWarmupStatus = {
+    ...playfabWarmupStatus,
+    ...nextStatus,
+    updatedAt: new Date().toISOString()
+  };
+  return playfabWarmupStatus;
 }
 
 function waitForSteamEvent(client, successEvent) {
@@ -1041,6 +1065,7 @@ async function loginPlayfabWithSteam() {
     response = await fetch(`https://${playfabConfig.titleId}.playfabapi.com/Client/LoginWithSteam`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: fetchTimeoutSignal(),
       body: JSON.stringify({
         TitleId: playfabConfig.titleId,
         SteamTicket: steamTicket,
@@ -1094,13 +1119,28 @@ function warmPlayfabSession() {
   if (hasReadyPlayfabSession()) return Promise.resolve(cachedPlayfabSession?.sessionTicket || playfabConfig.sessionTicket);
   if (playfabSessionPromise) return playfabSessionPromise;
 
+  updatePlayfabWarmupStatus({
+    state: "warming",
+    message: "Steam/PlayFab login is warming up.",
+    playfabStage: "session-warmup"
+  });
   playfabSessionPromise = loginPlayfabWithSteam()
     .then((session) => {
       cachedPlayfabSession = session;
+      updatePlayfabWarmupStatus({
+        state: "ready",
+        message: "Steam/PlayFab session is ready.",
+        playfabStage: "session-ready"
+      });
       return session.sessionTicket;
     })
     .catch((error) => {
       console.error("PlayFab warmup failed:", error.message);
+      updatePlayfabWarmupStatus({
+        state: "failed",
+        message: error.message,
+        playfabStage: error.playfabStage || "session-warmup"
+      });
       throw error;
     })
     .finally(() => {
@@ -1124,6 +1164,7 @@ async function fetchPlayfabProfile(playfabId) {
         "Content-Type": "application/json",
         "X-Authorization": sessionTicket
       },
+      signal: fetchTimeoutSignal(),
       body: JSON.stringify({
         PlayFabId: playfabId,
         ProfileConstraints: {
@@ -1174,11 +1215,30 @@ app.get("/api/playfab/:playfabId", requireAdmin, async (request, response, next)
         throw playfabConfigError();
       }
 
+      if (playfabWarmupStatus.state === "failed") {
+        const failedStatus = playfabWarmupStatus;
+        updatePlayfabWarmupStatus({
+          state: "idle",
+          message: "Previous warmup failure was reported. Next fetch will retry.",
+          playfabStage: "session-warmup"
+        });
+        response.status(502).json({
+          error: failedStatus.message || "Steam/PlayFab warmup failed.",
+          playfabStage: failedStatus.playfabStage || "session-warmup",
+          warmupStatus: failedStatus
+        });
+        return;
+      }
+
       void warmPlayfabSession().catch(() => {});
       response.json({
         pending: true,
         playfabStage: "session-warmup",
-        message: "Steam/PlayFab login is warming up. Wait about 20 seconds, then click Fetch PlayFab again."
+        message:
+          playfabWarmupStatus.state === "warming"
+            ? "Steam/PlayFab login is still warming up. Wait another 20 seconds, then click Fetch PlayFab again."
+            : "Steam/PlayFab login is warming up. Wait about 20 seconds, then click Fetch PlayFab again.",
+        warmupStatus: playfabWarmupStatus
       });
       return;
     }
