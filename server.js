@@ -11,6 +11,15 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
 const port = process.env.PORT || 3000;
+
+process.on("unhandledRejection", (error) => {
+  console.error("Unhandled rejection:", error);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("Uncaught exception:", error);
+});
+
 const adminPassword = process.env.ADMIN_PASSWORD;
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 const cookieName = "chiv2_admin";
@@ -1136,12 +1145,11 @@ function warmPlayfabSession() {
     })
     .catch((error) => {
       console.error("PlayFab warmup failed:", error.message);
-      updatePlayfabWarmupStatus({
+      return updatePlayfabWarmupStatus({
         state: "failed",
         message: error.message,
         playfabStage: error.playfabStage || "session-warmup"
       });
-      throw error;
     })
     .finally(() => {
       playfabSessionPromise = null;
@@ -1222,7 +1230,8 @@ app.get("/api/playfab/:playfabId", requireAdmin, async (request, response, next)
           message: "Previous warmup failure was reported. Next fetch will retry.",
           playfabStage: "session-warmup"
         });
-        response.status(502).json({
+        response.json({
+          failed: true,
           error: failedStatus.message || "Steam/PlayFab warmup failed.",
           playfabStage: failedStatus.playfabStage || "session-warmup",
           warmupStatus: failedStatus
@@ -1251,7 +1260,8 @@ app.get("/api/playfab/:playfabId", requireAdmin, async (request, response, next)
         response.json({ source: "stale-cache", warning: error.message, ...cached });
         return;
       }
-      response.status(error.statusCode || 502).json({
+      response.json({
+        failed: true,
         error: error.message,
         playfabStage: error.playfabStage || "lookup",
         missingConfig: error.missingConfig || []

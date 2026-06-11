@@ -328,6 +328,17 @@ submissionList.addEventListener("click", async (event) => {
       return;
     }
 
+    if (data.failed) {
+      if (result) {
+        const stage = data.playfabStage ? ` [${escapeHtml(data.playfabStage)}]` : "";
+        const missing = Array.isArray(data.missingConfig) && data.missingConfig.length
+          ? ` Missing: ${data.missingConfig.join(", ")}.`
+          : "";
+        result.textContent = `${data.error || "PlayFab lookup failed."}${stage}${missing}`;
+      }
+      return;
+    }
+
     const profile = data.profile || {};
     const stats = Array.isArray(profile.statistics) ? profile.statistics : [];
     if (result) {
