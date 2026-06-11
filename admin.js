@@ -52,8 +52,10 @@ async function api(path, options = {}) {
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: "Request failed." }));
-    throw new Error(error.error || "Request failed.");
+    const payload = await response.json().catch(() => ({ error: "Request failed." }));
+    const error = new Error(payload.error || "Request failed.");
+    Object.assign(error, payload);
+    throw error;
   }
 
   return response.json();
@@ -321,7 +323,12 @@ submissionList.addEventListener("click", async (event) => {
       `;
     }
   } catch (error) {
-    if (result) result.textContent = error.message;
+    if (result) {
+      const missing = Array.isArray(error.missingConfig) && error.missingConfig.length
+        ? ` Missing: ${error.missingConfig.join(", ")}.`
+        : "";
+      result.textContent = `${error.message}${missing}`;
+    }
   } finally {
     button.disabled = false;
   }

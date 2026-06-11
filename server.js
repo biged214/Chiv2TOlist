@@ -30,22 +30,28 @@ const discordWebhooks = {
   newSubmission: process.env.DISCORD_WEBHOOK_NEWSUB,
   updateRequest: process.env.DISCORD_WEBHOOK_UPDATEREQ
 };
+
+function envValue(...names) {
+  for (const name of names) {
+    const value = process.env[name];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
 const playfabConfig = {
-  titleId: process.env.PLAYFAB_TITLE_ID,
-  sessionTicket: process.env.PLAYFAB_SESSION_TICKET,
-  cacheMinutes: Number(process.env.PLAYFAB_CACHE_MINUTES || "360"),
-  sessionMinutes: Number(process.env.PLAYFAB_SESSION_MINUTES || "120")
+  titleId: envValue("PLAYFAB_TITLE_ID", "playfab_title_id"),
+  sessionTicket: envValue("PLAYFAB_SESSION_TICKET", "playfab_session_ticket"),
+  cacheMinutes: Number(envValue("PLAYFAB_CACHE_MINUTES", "playfab_cache_minutes") || "360"),
+  sessionMinutes: Number(envValue("PLAYFAB_SESSION_MINUTES", "playfab_session_minutes") || "120")
 };
 const steamConfig = {
-  appId: Number(process.env.CHIVALRY2_STEAM_APP_ID || process.env.STEAM_APP_ID || "1824220"),
-  username: process.env.STEAM_USERNAME || process.env.steam_username,
-  password: process.env.STEAM_PASSWORD || process.env.steam_password,
+  appId: Number(envValue("CHIVALRY2_STEAM_APP_ID", "chivalry2_steam_app_id", "STEAM_APP_ID", "steam_app_id") || "1824220"),
+  username: envValue("STEAM_USERNAME", "steam_username"),
+  password: envValue("STEAM_PASSWORD", "steam_password"),
   sharedSecret:
-    process.env.STEAM_SHARED_SECRET ||
-    process.env.steam_shared_secret ||
-    process.env.STEAM_IDENTITY_SECRET ||
-    process.env.steam_identity_secret,
-  refreshToken: process.env.STEAM_REFRESH_TOKEN || process.env.steam_refresh_token
+    envValue("STEAM_SHARED_SECRET", "steam_shared_secret", "STEAM_IDENTITY_SECRET", "steam_identity_secret"),
+  refreshToken: envValue("STEAM_REFRESH_TOKEN", "steam_refresh_token")
 };
 let steamClientPromise;
 let playfabSessionPromise;
@@ -875,6 +881,37 @@ function hasSteamPlayfabConfig() {
   );
 }
 
+function playfabConfigStatus() {
+  const hasPasswordLogin = Boolean(steamConfig.username && steamConfig.password && steamConfig.sharedSecret);
+  const hasRefreshLogin = Boolean(steamConfig.refreshToken);
+  const missing = [];
+
+  if (!playfabConfig.titleId) missing.push("PLAYFAB_TITLE_ID");
+  if (!steamConfig.appId) missing.push("CHIVALRY2_STEAM_APP_ID");
+  if (!hasPasswordLogin && !hasRefreshLogin) {
+    if (!steamConfig.username) missing.push("STEAM_USERNAME");
+    if (!steamConfig.password) missing.push("STEAM_PASSWORD");
+    if (!steamConfig.sharedSecret) missing.push("STEAM_SHARED_SECRET");
+    missing.push("or STEAM_REFRESH_TOKEN");
+  }
+
+  return {
+    configured: Boolean(playfabConfig.sessionTicket || (playfabConfig.titleId && steamConfig.appId && (hasPasswordLogin || hasRefreshLogin))),
+    manualSessionTicket: Boolean(playfabConfig.sessionTicket),
+    steamLogin: hasPasswordLogin,
+    steamRefreshToken: hasRefreshLogin,
+    steamAppId: steamConfig.appId || null,
+    missing
+  };
+}
+
+function playfabConfigError() {
+  return Object.assign(new Error("PlayFab lookup is not configured yet."), {
+    statusCode: 503,
+    missingConfig: playfabConfigStatus().missing
+  });
+}
+
 function playfabSessionMaxAgeMs() {
   return Math.max(15, Number.isFinite(playfabConfig.sessionMinutes) ? playfabConfig.sessionMinutes : 120) * 60 * 1000;
 }
@@ -908,7 +945,7 @@ async function getSteamClient() {
 
   steamClientPromise = (async () => {
     if (!hasSteamPlayfabConfig()) {
-      throw new Error("Steam PlayFab lookup is not configured yet.");
+      throw playfabConfigError();
     }
 
     const SteamUser = require("steam-user");
@@ -1008,7 +1045,7 @@ async function getPlayfabSessionTicket() {
   }
 
   if (!hasSteamPlayfabConfig()) {
-    throw Object.assign(new Error("PlayFab lookup is not configured yet."), { statusCode: 503 });
+    throw playfabConfigError();
   }
 
   if (!playfabSessionPromise) {
@@ -1027,7 +1064,7 @@ async function getPlayfabSessionTicket() {
 
 async function fetchPlayfabProfile(playfabId) {
   if (!playfabConfig.titleId || (!playfabConfig.sessionTicket && !hasSteamPlayfabConfig())) {
-    throw Object.assign(new Error("PlayFab lookup is not configured yet."), { statusCode: 503 });
+    throw playfabConfigError();
   }
 
   const sessionTicket = await getPlayfabSessionTicket();
@@ -1060,6 +1097,10 @@ app.get("/api/config", (_request, response) => {
   response.json({ tiers, listTypes });
 });
 
+app.get("/api/playfab-status", requireAdmin, (_request, response) => {
+  response.json(playfabConfigStatus());
+});
+
 app.get("/api/playfab/:playfabId", requireAdmin, async (request, response, next) => {
   try {
     const playfabId = cleanPlayfabId(request.params.playfabId);
@@ -1083,7 +1124,10 @@ app.get("/api/playfab/:playfabId", requireAdmin, async (request, response, next)
         response.json({ source: "stale-cache", warning: error.message, ...cached });
         return;
       }
-      response.status(error.statusCode || 502).json({ error: error.message });
+      response.status(error.statusCode || 502).json({
+        error: error.message,
+        missingConfig: error.missingConfig || []
+      });
     }
   } catch (error) {
     next(error);
