@@ -320,6 +320,14 @@ submissionList.addEventListener("click", async (event) => {
 
   try {
     const data = await api(`/api/playfab/${encodeURIComponent(submission.playfabId)}`);
+    if (data.pending) {
+      if (result) {
+        const stage = data.playfabStage ? ` [${escapeHtml(data.playfabStage)}]` : "";
+        result.textContent = `${data.message || "PlayFab session is warming up. Try again shortly."}${stage}`;
+      }
+      return;
+    }
+
     const profile = data.profile || {};
     const stats = Array.isArray(profile.statistics) ? profile.statistics : [];
     if (result) {

@@ -921,6 +921,13 @@ function playfabSessionMaxAgeMs() {
   return Math.max(15, Number.isFinite(playfabConfig.sessionMinutes) ? playfabConfig.sessionMinutes : 120) * 60 * 1000;
 }
 
+function hasReadyPlayfabSession() {
+  return Boolean(
+    playfabConfig.sessionTicket ||
+      (cachedPlayfabSession?.sessionTicket && cachedPlayfabSession.expiresAt > Date.now() + 60000)
+  );
+}
+
 function waitForSteamEvent(client, successEvent) {
   return new Promise((resolve, reject) => {
     const cleanup = () => {
@@ -1083,6 +1090,26 @@ async function getPlayfabSessionTicket() {
   return playfabSessionPromise;
 }
 
+function warmPlayfabSession() {
+  if (hasReadyPlayfabSession()) return Promise.resolve(cachedPlayfabSession?.sessionTicket || playfabConfig.sessionTicket);
+  if (playfabSessionPromise) return playfabSessionPromise;
+
+  playfabSessionPromise = loginPlayfabWithSteam()
+    .then((session) => {
+      cachedPlayfabSession = session;
+      return session.sessionTicket;
+    })
+    .catch((error) => {
+      console.error("PlayFab warmup failed:", error.message);
+      throw error;
+    })
+    .finally(() => {
+      playfabSessionPromise = null;
+    });
+
+  return playfabSessionPromise;
+}
+
 async function fetchPlayfabProfile(playfabId) {
   if (!playfabConfig.titleId || (!playfabConfig.sessionTicket && !hasSteamPlayfabConfig())) {
     throw playfabConfigError();
@@ -1139,6 +1166,20 @@ app.get("/api/playfab/:playfabId", requireAdmin, async (request, response, next)
     const forceRefresh = request.query.force === "1";
     if (!forceRefresh && isFreshPlayfabCache(cached)) {
       response.json({ source: "cache", ...cached });
+      return;
+    }
+
+    if (!hasReadyPlayfabSession()) {
+      if (!hasSteamPlayfabConfig()) {
+        throw playfabConfigError();
+      }
+
+      void warmPlayfabSession().catch(() => {});
+      response.json({
+        pending: true,
+        playfabStage: "session-warmup",
+        message: "Steam/PlayFab login is warming up. Wait about 20 seconds, then click Fetch PlayFab again."
+      });
       return;
     }
 
