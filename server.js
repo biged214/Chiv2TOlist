@@ -970,8 +970,8 @@ function waitForSteamEvent(client, successEvent) {
     };
     const timer = setTimeout(() => {
       cleanup();
-      reject(playfabServiceError("Steam login timed out.", 504, "steam-login"));
-    }, 45000);
+      reject(playfabServiceError("Steam login timed out after 120 seconds.", 504, "steam-login"));
+    }, 120000);
     const onSuccess = (...args) => {
       cleanup();
       resolve(args);
@@ -1011,10 +1011,20 @@ async function getSteamClient() {
     });
     client.on("steamGuard", (_domain, callback, lastCodeWrong) => {
       if (!steamConfig.sharedSecret) return;
+      updatePlayfabWarmupStatus({
+        state: "warming",
+        message: lastCodeWrong ? "Steam rejected the previous Steam Guard code. Waiting for a fresh code." : "Submitting Steam Guard code.",
+        playfabStage: "steam-guard"
+      });
       const delay = lastCodeWrong ? 30000 : 0;
       setTimeout(() => callback(SteamTotp.generateAuthCode(steamConfig.sharedSecret)), delay);
     });
 
+    updatePlayfabWarmupStatus({
+      state: "warming",
+      message: "Steam login started.",
+      playfabStage: "steam-login"
+    });
     const loggedOn = waitForSteamEvent(client, "loggedOn");
     if (steamConfig.refreshToken) {
       client.logOn({
@@ -1031,6 +1041,11 @@ async function getSteamClient() {
     }
 
     await loggedOn;
+    updatePlayfabWarmupStatus({
+      state: "warming",
+      message: "Steam login succeeded. Requesting a Chivalry 2 app ticket.",
+      playfabStage: "steam-ticket"
+    });
     return client;
   })().catch((error) => {
     steamClientPromise = null;
@@ -1043,12 +1058,32 @@ async function getSteamClient() {
 async function createSteamTicket() {
   const client = await getSteamClient();
   try {
+    updatePlayfabWarmupStatus({
+      state: "warming",
+      message: "Requesting encrypted Chivalry 2 Steam app ticket.",
+      playfabStage: "steam-ticket"
+    });
     const result = await client.createEncryptedAppTicket(steamConfig.appId);
+    updatePlayfabWarmupStatus({
+      state: "warming",
+      message: "Steam app ticket received. Logging into PlayFab.",
+      playfabStage: "playfab-login"
+    });
     return result.encryptedAppTicket.toString("hex");
   } catch (encryptedError) {
     console.warn("Encrypted Steam app ticket failed, trying auth session ticket:", encryptedError.message);
     try {
+      updatePlayfabWarmupStatus({
+        state: "warming",
+        message: "Encrypted Steam app ticket failed. Trying Steam auth session ticket.",
+        playfabStage: "steam-ticket"
+      });
       const result = await client.createAuthSessionTicket(steamConfig.appId);
+      updatePlayfabWarmupStatus({
+        state: "warming",
+        message: "Steam session ticket received. Logging into PlayFab.",
+        playfabStage: "playfab-login"
+      });
       return result.sessionTicket.toString("hex");
     } catch (sessionError) {
       throw playfabServiceError(
@@ -1093,6 +1128,11 @@ async function loginPlayfabWithSteam() {
     throw playfabServiceError("PlayFab did not return a session ticket.", 502, "playfab-login");
   }
 
+  updatePlayfabWarmupStatus({
+    state: "warming",
+    message: "PlayFab login succeeded.",
+    playfabStage: "session-ready"
+  });
   return {
     sessionTicket: payload.data.SessionTicket,
     expiresAt: Date.now() + playfabSessionMaxAgeMs()
@@ -1245,8 +1285,8 @@ app.get("/api/playfab/:playfabId", requireAdmin, async (request, response, next)
         playfabStage: "session-warmup",
         message:
           playfabWarmupStatus.state === "warming"
-            ? "Steam/PlayFab login is still warming up. Wait another 20 seconds, then click Fetch PlayFab again."
-            : "Steam/PlayFab login is warming up. Wait about 20 seconds, then click Fetch PlayFab again.",
+            ? `${playfabWarmupStatus.message || "Steam/PlayFab login is still warming up."} Wait another minute, then click Fetch PlayFab again.`
+            : "Steam/PlayFab login is warming up. Wait about 2 minutes, then click Fetch PlayFab again.",
         warmupStatus: playfabWarmupStatus
       });
       return;
