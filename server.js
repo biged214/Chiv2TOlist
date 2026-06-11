@@ -1,10 +1,12 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import mysql from "mysql2/promise";
 
+const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
@@ -31,8 +33,23 @@ const discordWebhooks = {
 const playfabConfig = {
   titleId: process.env.PLAYFAB_TITLE_ID,
   sessionTicket: process.env.PLAYFAB_SESSION_TICKET,
-  cacheMinutes: Number(process.env.PLAYFAB_CACHE_MINUTES || "360")
+  cacheMinutes: Number(process.env.PLAYFAB_CACHE_MINUTES || "360"),
+  sessionMinutes: Number(process.env.PLAYFAB_SESSION_MINUTES || "120")
 };
+const steamConfig = {
+  appId: Number(process.env.CHIVALRY2_STEAM_APP_ID || process.env.STEAM_APP_ID || "1824220"),
+  username: process.env.STEAM_USERNAME || process.env.steam_username,
+  password: process.env.STEAM_PASSWORD || process.env.steam_password,
+  sharedSecret:
+    process.env.STEAM_SHARED_SECRET ||
+    process.env.steam_shared_secret ||
+    process.env.STEAM_IDENTITY_SECRET ||
+    process.env.steam_identity_secret,
+  refreshToken: process.env.STEAM_REFRESH_TOKEN || process.env.steam_refresh_token
+};
+let steamClientPromise;
+let playfabSessionPromise;
+let cachedPlayfabSession;
 function hasDatabase() {
   return Boolean(process.env.DB_HOST && process.env.DB_NAME && process.env.DB_USER);
 }
@@ -850,16 +867,175 @@ function isFreshPlayfabCache(cached) {
   return cached?.fetchedAt && Date.now() - new Date(cached.fetchedAt).getTime() < playfabCacheMaxAgeMs();
 }
 
-async function fetchPlayfabProfile(playfabId) {
-  if (!playfabConfig.titleId || !playfabConfig.sessionTicket) {
+function hasSteamPlayfabConfig() {
+  return Boolean(
+    playfabConfig.titleId &&
+      steamConfig.appId &&
+      ((steamConfig.username && steamConfig.password && steamConfig.sharedSecret) || steamConfig.refreshToken)
+  );
+}
+
+function playfabSessionMaxAgeMs() {
+  return Math.max(15, Number.isFinite(playfabConfig.sessionMinutes) ? playfabConfig.sessionMinutes : 120) * 60 * 1000;
+}
+
+function waitForSteamEvent(client, successEvent) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      client.off(successEvent, onSuccess);
+      client.off("error", onError);
+      clearTimeout(timer);
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("Steam login timed out."));
+    }, 45000);
+    const onSuccess = (...args) => {
+      cleanup();
+      resolve(args);
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    client.once(successEvent, onSuccess);
+    client.once("error", onError);
+  });
+}
+
+async function getSteamClient() {
+  if (steamClientPromise) return steamClientPromise;
+
+  steamClientPromise = (async () => {
+    if (!hasSteamPlayfabConfig()) {
+      throw new Error("Steam PlayFab lookup is not configured yet.");
+    }
+
+    const SteamUser = require("steam-user");
+    const SteamTotp = require("steam-totp");
+    const client = new SteamUser({ autoRelogin: true });
+
+    client.on("error", (error) => {
+      console.error("Steam client error:", error.message);
+    });
+    client.on("disconnected", (_eresult, message) => {
+      console.warn("Steam client disconnected:", message || "No reason provided");
+    });
+    client.on("refreshToken", (refreshToken) => {
+      console.info("Steam refresh token issued. Save it as STEAM_REFRESH_TOKEN in GoDaddy Secrets for more reliable future logins.");
+      if (process.env.NODE_ENV !== "production") {
+        console.info(`Local Steam refresh token: ${refreshToken}`);
+      }
+    });
+    client.on("steamGuard", (_domain, callback, lastCodeWrong) => {
+      if (!steamConfig.sharedSecret) return;
+      const delay = lastCodeWrong ? 30000 : 0;
+      setTimeout(() => callback(SteamTotp.generateAuthCode(steamConfig.sharedSecret)), delay);
+    });
+
+    const loggedOn = waitForSteamEvent(client, "loggedOn");
+    if (steamConfig.refreshToken) {
+      client.logOn({
+        refreshToken: steamConfig.refreshToken,
+        machineName: "Chiv2TOList PlayFab Bot"
+      });
+    } else {
+      client.logOn({
+        accountName: steamConfig.username,
+        password: steamConfig.password,
+        twoFactorCode: SteamTotp.generateAuthCode(steamConfig.sharedSecret),
+        machineName: "Chiv2TOList PlayFab Bot"
+      });
+    }
+
+    await loggedOn;
+    return client;
+  })().catch((error) => {
+    steamClientPromise = null;
+    throw error;
+  });
+
+  return steamClientPromise;
+}
+
+async function createSteamTicket() {
+  const client = await getSteamClient();
+  try {
+    const result = await client.createEncryptedAppTicket(steamConfig.appId);
+    return result.encryptedAppTicket.toString("hex");
+  } catch (encryptedError) {
+    console.warn("Encrypted Steam app ticket failed, trying auth session ticket:", encryptedError.message);
+    const result = await client.createAuthSessionTicket(steamConfig.appId);
+    return result.sessionTicket.toString("hex");
+  }
+}
+
+async function loginPlayfabWithSteam() {
+  if (!playfabConfig.titleId) {
+    throw Object.assign(new Error("PLAYFAB_TITLE_ID is required for Steam PlayFab lookup."), { statusCode: 503 });
+  }
+
+  const steamTicket = await createSteamTicket();
+  const response = await fetch(`https://${playfabConfig.titleId}.playfabapi.com/Client/LoginWithSteam`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      TitleId: playfabConfig.titleId,
+      SteamTicket: steamTicket,
+      CreateAccount: false
+    })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.error) {
+    const message = payload.errorMessage || payload.error || `PlayFab Steam login returned ${response.status}`;
+    throw Object.assign(new Error(message), { statusCode: response.status || 502 });
+  }
+  if (!payload.data?.SessionTicket) {
+    throw Object.assign(new Error("PlayFab did not return a session ticket."), { statusCode: 502 });
+  }
+
+  return {
+    sessionTicket: payload.data.SessionTicket,
+    expiresAt: Date.now() + playfabSessionMaxAgeMs()
+  };
+}
+
+async function getPlayfabSessionTicket() {
+  if (playfabConfig.sessionTicket) return playfabConfig.sessionTicket;
+
+  if (cachedPlayfabSession?.sessionTicket && cachedPlayfabSession.expiresAt > Date.now() + 60000) {
+    return cachedPlayfabSession.sessionTicket;
+  }
+
+  if (!hasSteamPlayfabConfig()) {
     throw Object.assign(new Error("PlayFab lookup is not configured yet."), { statusCode: 503 });
   }
 
+  if (!playfabSessionPromise) {
+    playfabSessionPromise = loginPlayfabWithSteam()
+      .then((session) => {
+        cachedPlayfabSession = session;
+        return session.sessionTicket;
+      })
+      .finally(() => {
+        playfabSessionPromise = null;
+      });
+  }
+
+  return playfabSessionPromise;
+}
+
+async function fetchPlayfabProfile(playfabId) {
+  if (!playfabConfig.titleId || (!playfabConfig.sessionTicket && !hasSteamPlayfabConfig())) {
+    throw Object.assign(new Error("PlayFab lookup is not configured yet."), { statusCode: 503 });
+  }
+
+  const sessionTicket = await getPlayfabSessionTicket();
   const response = await fetch(`https://${playfabConfig.titleId}.playfabapi.com/Client/GetPlayerProfile`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Authorization": playfabConfig.sessionTicket
+      "X-Authorization": sessionTicket
     },
     body: JSON.stringify({
       PlayFabId: playfabId,
