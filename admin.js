@@ -153,6 +153,11 @@ function renderSubmissions() {
         <strong>${escapeHtml(submission.name)}</strong>
         <span>${isUpdateRequest ? "Update request" : "New submission"} - ${escapeHtml(tier?.label || submission.tier)} tier - ${escapeHtml(submission.region || "Unknown region")} - ${escapeHtml(submission.role || "Flexible")}${submission.playfabId ? " - PlayFab included" : ""}</span>
         <span>Discord: ${escapeHtml(submission.discordUsername || "Not provided")}</span>
+        ${
+          submission.playfabId
+            ? `<a class="stats-link" href="https://chivalry2stats.com/player?id=${encodeURIComponent(submission.playfabId)}" target="_blank" rel="noopener noreferrer">Review Chivalry2Stats record</a>`
+            : ""
+        }
         <p>${escapeHtml(submission.notes || "No notes included.")}</p>
       </div>
       <div class="admin-actions">
