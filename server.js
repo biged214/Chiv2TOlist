@@ -22,10 +22,16 @@ const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path
 const playersFile = path.join(dataDir, "players.json");
 const submissionsFile = path.join(dataDir, "submissions.json");
 const regionsFile = path.join(dataDir, "regions.json");
+const playfabCacheFile = path.join(dataDir, "playfab-cache.json");
 const discordWebhooks = {
   approved: process.env.DISCORD_WEBHOOK_NEWAPPROVE,
   newSubmission: process.env.DISCORD_WEBHOOK_NEWSUB,
   updateRequest: process.env.DISCORD_WEBHOOK_UPDATEREQ
+};
+const playfabConfig = {
+  titleId: process.env.PLAYFAB_TITLE_ID,
+  sessionTicket: process.env.PLAYFAB_SESSION_TICKET,
+  cacheMinutes: Number(process.env.PLAYFAB_CACHE_MINUTES || "360")
 };
 function hasDatabase() {
   return Boolean(process.env.DB_HOST && process.env.DB_NAME && process.env.DB_USER);
@@ -307,6 +313,7 @@ async function withDatabase(callback) {
     await ensurePlayersTable(connection);
     await ensureSubmissionsTable(connection);
     await ensureRegionsTable(connection);
+    await ensurePlayfabCacheTable(connection);
     return await callback(connection);
   } finally {
     await connection.end();
@@ -416,6 +423,16 @@ async function ensureRegionsTable(connection) {
       await connection.execute("INSERT INTO `regions` (`name`, `sort_order`) VALUES (?, ?)", [region, index + 1]);
     }
   }
+}
+
+async function ensurePlayfabCacheTable(connection) {
+  await connection.execute(`
+    CREATE TABLE IF NOT EXISTS \`playfab_cache\` (
+      \`playfab_id\` VARCHAR(64) PRIMARY KEY,
+      \`payload\` MEDIUMTEXT NOT NULL,
+      \`fetched_at\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
 }
 
 function rowToPlayer(row) {
@@ -752,8 +769,149 @@ async function ensureRegionAllowed(region) {
   return regions.includes(region) ? region : "";
 }
 
+function cleanPlayfabId(value) {
+  return cleanText(value, 64).replace(/[^a-zA-Z0-9]/g, "");
+}
+
+function playfabCacheMaxAgeMs() {
+  return Math.max(5, Number.isFinite(playfabConfig.cacheMinutes) ? playfabConfig.cacheMinutes : 360) * 60 * 1000;
+}
+
+function summarizePlayfabProfile(profile = {}, playfabId) {
+  return {
+    playfabId: profile.PlayerId || playfabId,
+    displayName: profile.DisplayName || "",
+    avatarUrl: profile.AvatarUrl || "",
+    lastLogin: profile.LastLogin || "",
+    statistics: Array.isArray(profile.Statistics)
+      ? profile.Statistics.map((stat) => ({
+          name: cleanText(stat.Name, 80),
+          value: Number.isFinite(Number(stat.Value)) ? Number(stat.Value) : stat.Value,
+          version: Number.isFinite(Number(stat.Version)) ? Number(stat.Version) : undefined
+        }))
+      : []
+  };
+}
+
+async function readPlayfabCache(playfabId) {
+  if (hasDatabase()) {
+    return withDatabase(async (connection) => {
+      const [rows] = await connection.execute(
+        "SELECT `payload`, `fetched_at` FROM `playfab_cache` WHERE `playfab_id` = ? LIMIT 1",
+        [playfabId]
+      );
+      if (!rows.length) return null;
+      return {
+        profile: JSON.parse(rows[0].payload),
+        fetchedAt: new Date(rows[0].fetched_at).toISOString()
+      };
+    });
+  }
+
+  try {
+    const raw = await fs.readFile(playfabCacheFile, "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed[playfabId] || null;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    return null;
+  }
+}
+
+async function writePlayfabCache(playfabId, profile) {
+  const fetchedAt = new Date().toISOString();
+  if (hasDatabase()) {
+    return withDatabase(async (connection) => {
+      await connection.execute(
+        `INSERT INTO \`playfab_cache\` (\`playfab_id\`, \`payload\`, \`fetched_at\`)
+         VALUES (?, ?, CURRENT_TIMESTAMP)
+         ON DUPLICATE KEY UPDATE
+           \`payload\` = VALUES(\`payload\`),
+           \`fetched_at\` = CURRENT_TIMESTAMP`,
+        [playfabId, JSON.stringify(profile)]
+      );
+      return { profile, fetchedAt };
+    });
+  }
+
+  let parsed = {};
+  try {
+    parsed = JSON.parse(await fs.readFile(playfabCacheFile, "utf8"));
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  parsed[playfabId] = { profile, fetchedAt };
+  await fs.mkdir(dataDir, { recursive: true });
+  await fs.writeFile(playfabCacheFile, `${JSON.stringify(parsed, null, 2)}\n`);
+  return { profile, fetchedAt };
+}
+
+function isFreshPlayfabCache(cached) {
+  return cached?.fetchedAt && Date.now() - new Date(cached.fetchedAt).getTime() < playfabCacheMaxAgeMs();
+}
+
+async function fetchPlayfabProfile(playfabId) {
+  if (!playfabConfig.titleId || !playfabConfig.sessionTicket) {
+    throw Object.assign(new Error("PlayFab lookup is not configured yet."), { statusCode: 503 });
+  }
+
+  const response = await fetch(`https://${playfabConfig.titleId}.playfabapi.com/Client/GetPlayerProfile`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Authorization": playfabConfig.sessionTicket
+    },
+    body: JSON.stringify({
+      PlayFabId: playfabId,
+      ProfileConstraints: {
+        ShowAvatarUrl: true,
+        ShowDisplayName: true,
+        ShowLastLogin: true,
+        ShowStatistics: true
+      }
+    })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.error) {
+    const message = payload.errorMessage || payload.error || `PlayFab returned ${response.status}`;
+    throw Object.assign(new Error(message), { statusCode: response.status || 502 });
+  }
+
+  return summarizePlayfabProfile(payload.data?.PlayerProfile, playfabId);
+}
+
 app.get("/api/config", (_request, response) => {
   response.json({ tiers, listTypes });
+});
+
+app.get("/api/playfab/:playfabId", requireAdmin, async (request, response, next) => {
+  try {
+    const playfabId = cleanPlayfabId(request.params.playfabId);
+    if (!playfabId) {
+      response.status(400).json({ error: "PlayFab ID is required." });
+      return;
+    }
+
+    const cached = await readPlayfabCache(playfabId);
+    const forceRefresh = request.query.force === "1";
+    if (!forceRefresh && isFreshPlayfabCache(cached)) {
+      response.json({ source: "cache", ...cached });
+      return;
+    }
+
+    try {
+      const profile = await fetchPlayfabProfile(playfabId);
+      response.json({ source: "playfab", ...(await writePlayfabCache(playfabId, profile)) });
+    } catch (error) {
+      if (cached) {
+        response.json({ source: "stale-cache", warning: error.message, ...cached });
+        return;
+      }
+      response.status(error.statusCode || 502).json({ error: error.message });
+    }
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get("/api/regions", async (_request, response, next) => {

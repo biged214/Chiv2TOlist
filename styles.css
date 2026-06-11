@@ -416,6 +416,15 @@ textarea {
   text-decoration: underline;
 }
 
+.playfab-result {
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
 .player-card__actions {
   display: flex;
   justify-content: flex-end;

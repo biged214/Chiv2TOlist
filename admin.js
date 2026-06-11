@@ -158,9 +158,15 @@ function renderSubmissions() {
             ? `<a class="stats-link" href="https://chivalry2stats.com/player?id=${encodeURIComponent(submission.playfabId)}" target="_blank" rel="noopener noreferrer">Review Chivalry2Stats record</a>`
             : ""
         }
+        <div class="playfab-result" id="playfab-result-${escapeHtml(submission.id)}"></div>
         <p>${escapeHtml(submission.notes || "No notes included.")}</p>
       </div>
       <div class="admin-actions">
+        ${
+          submission.playfabId
+            ? `<button class="mini-button" type="button" data-stats-action="fetch" data-id="${submission.id}">Fetch PlayFab</button>`
+            : ""
+        }
         <button class="mini-button mini-button--approve" type="button" data-submission-action="approve" data-id="${submission.id}">Approve</button>
         <button class="mini-button" type="button" data-submission-action="reject" data-id="${submission.id}">Reject</button>
       </div>
@@ -288,6 +294,36 @@ submissionList.addEventListener("click", (event) => {
     api(`/api/submissions/${encodeURIComponent(id)}/reject?listType=${encodeURIComponent(currentListType)}`, { method: "POST" })
       .then(refreshSubmissions)
       .catch((error) => alert(error.message));
+  }
+});
+
+submissionList.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-stats-action]");
+  if (!button) return;
+
+  const submission = submissions.find((item) => item.id === button.dataset.id);
+  if (!submission?.playfabId) return;
+
+  const result = document.querySelector(`#playfab-result-${CSS.escape(submission.id)}`);
+  button.disabled = true;
+  if (result) result.textContent = "Fetching PlayFab profile...";
+
+  try {
+    const data = await api(`/api/playfab/${encodeURIComponent(submission.playfabId)}`);
+    const profile = data.profile || {};
+    const stats = Array.isArray(profile.statistics) ? profile.statistics : [];
+    if (result) {
+      result.innerHTML = `
+        <span>PlayFab: ${escapeHtml(profile.displayName || "No display name")} ${data.source !== "playfab" ? `(${escapeHtml(data.source)})` : ""}</span>
+        <span>${stats.length ? `${stats.length} stats returned` : "No stats returned"}</span>
+        ${profile.lastLogin ? `<span>Last login: ${escapeHtml(new Date(profile.lastLogin).toLocaleString())}</span>` : ""}
+        ${data.warning ? `<span>${escapeHtml(data.warning)}</span>` : ""}
+      `;
+    }
+  } catch (error) {
+    if (result) result.textContent = error.message;
+  } finally {
+    button.disabled = false;
   }
 });
 
