@@ -52,9 +52,17 @@ async function api(path, options = {}) {
   });
 
   if (!response.ok) {
-    const payload = await response.json().catch(() => ({ error: "Request failed." }));
+    const text = await response.text();
+    let payload;
+    try {
+      payload = text ? JSON.parse(text) : {};
+    } catch {
+      payload = { error: text ? `HTTP ${response.status}: ${text.slice(0, 180)}` : `HTTP ${response.status}: Request failed.` };
+    }
     const error = new Error(payload.error || "Request failed.");
+    if (!payload.error) error.message = `HTTP ${response.status}: Request failed.`;
     Object.assign(error, payload);
+    error.status = response.status;
     throw error;
   }
 
@@ -324,10 +332,11 @@ submissionList.addEventListener("click", async (event) => {
     }
   } catch (error) {
     if (result) {
+      const stage = error.playfabStage ? ` [${error.playfabStage}]` : "";
       const missing = Array.isArray(error.missingConfig) && error.missingConfig.length
         ? ` Missing: ${error.missingConfig.join(", ")}.`
         : "";
-      result.textContent = `${error.message}${missing}`;
+      result.textContent = `${error.message}${stage}${missing}`;
     }
   } finally {
     button.disabled = false;

@@ -908,8 +908,13 @@ function playfabConfigStatus() {
 function playfabConfigError() {
   return Object.assign(new Error("PlayFab lookup is not configured yet."), {
     statusCode: 503,
+    playfabStage: "configuration",
     missingConfig: playfabConfigStatus().missing
   });
+}
+
+function playfabServiceError(message, statusCode = 502, playfabStage = "lookup") {
+  return Object.assign(new Error(message), { statusCode, playfabStage });
 }
 
 function playfabSessionMaxAgeMs() {
@@ -925,7 +930,7 @@ function waitForSteamEvent(client, successEvent) {
     };
     const timer = setTimeout(() => {
       cleanup();
-      reject(new Error("Steam login timed out."));
+      reject(playfabServiceError("Steam login timed out.", 504, "steam-login"));
     }, 45000);
     const onSuccess = (...args) => {
       cleanup();
@@ -933,7 +938,7 @@ function waitForSteamEvent(client, successEvent) {
     };
     const onError = (error) => {
       cleanup();
-      reject(error);
+      reject(playfabServiceError(`Steam login failed: ${error.message}`, error.statusCode || 502, "steam-login"));
     };
     client.once(successEvent, onSuccess);
     client.once("error", onError);
@@ -1002,33 +1007,49 @@ async function createSteamTicket() {
     return result.encryptedAppTicket.toString("hex");
   } catch (encryptedError) {
     console.warn("Encrypted Steam app ticket failed, trying auth session ticket:", encryptedError.message);
-    const result = await client.createAuthSessionTicket(steamConfig.appId);
-    return result.sessionTicket.toString("hex");
+    try {
+      const result = await client.createAuthSessionTicket(steamConfig.appId);
+      return result.sessionTicket.toString("hex");
+    } catch (sessionError) {
+      throw playfabServiceError(
+        `Steam ticket failed: encrypted ticket: ${encryptedError.message}; session ticket: ${sessionError.message}`,
+        502,
+        "steam-ticket"
+      );
+    }
   }
 }
 
 async function loginPlayfabWithSteam() {
   if (!playfabConfig.titleId) {
-    throw Object.assign(new Error("PLAYFAB_TITLE_ID is required for Steam PlayFab lookup."), { statusCode: 503 });
+    throw Object.assign(new Error("PLAYFAB_TITLE_ID is required for Steam PlayFab lookup."), {
+      statusCode: 503,
+      playfabStage: "configuration"
+    });
   }
 
   const steamTicket = await createSteamTicket();
-  const response = await fetch(`https://${playfabConfig.titleId}.playfabapi.com/Client/LoginWithSteam`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      TitleId: playfabConfig.titleId,
-      SteamTicket: steamTicket,
-      CreateAccount: false
-    })
-  });
+  let response;
+  try {
+    response = await fetch(`https://${playfabConfig.titleId}.playfabapi.com/Client/LoginWithSteam`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        TitleId: playfabConfig.titleId,
+        SteamTicket: steamTicket,
+        CreateAccount: false
+      })
+    });
+  } catch (error) {
+    throw playfabServiceError(`PlayFab Steam login request failed: ${error.message}`, 502, "playfab-login");
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.error) {
     const message = payload.errorMessage || payload.error || `PlayFab Steam login returned ${response.status}`;
-    throw Object.assign(new Error(message), { statusCode: response.status || 502 });
+    throw playfabServiceError(`PlayFab Steam login failed: ${message}`, response.status || 502, "playfab-login");
   }
   if (!payload.data?.SessionTicket) {
-    throw Object.assign(new Error("PlayFab did not return a session ticket."), { statusCode: 502 });
+    throw playfabServiceError("PlayFab did not return a session ticket.", 502, "playfab-login");
   }
 
   return {
@@ -1068,26 +1089,31 @@ async function fetchPlayfabProfile(playfabId) {
   }
 
   const sessionTicket = await getPlayfabSessionTicket();
-  const response = await fetch(`https://${playfabConfig.titleId}.playfabapi.com/Client/GetPlayerProfile`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Authorization": sessionTicket
-    },
-    body: JSON.stringify({
-      PlayFabId: playfabId,
-      ProfileConstraints: {
-        ShowAvatarUrl: true,
-        ShowDisplayName: true,
-        ShowLastLogin: true,
-        ShowStatistics: true
-      }
-    })
-  });
+  let response;
+  try {
+    response = await fetch(`https://${playfabConfig.titleId}.playfabapi.com/Client/GetPlayerProfile`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Authorization": sessionTicket
+      },
+      body: JSON.stringify({
+        PlayFabId: playfabId,
+        ProfileConstraints: {
+          ShowAvatarUrl: true,
+          ShowDisplayName: true,
+          ShowLastLogin: true,
+          ShowStatistics: true
+        }
+      })
+    });
+  } catch (error) {
+    throw playfabServiceError(`PlayFab profile request failed: ${error.message}`, 502, "playfab-profile");
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.error) {
     const message = payload.errorMessage || payload.error || `PlayFab returned ${response.status}`;
-    throw Object.assign(new Error(message), { statusCode: response.status || 502 });
+    throw playfabServiceError(`PlayFab profile lookup failed: ${message}`, response.status || 502, "playfab-profile");
   }
 
   return summarizePlayfabProfile(payload.data?.PlayerProfile, playfabId);
@@ -1126,6 +1152,7 @@ app.get("/api/playfab/:playfabId", requireAdmin, async (request, response, next)
       }
       response.status(error.statusCode || 502).json({
         error: error.message,
+        playfabStage: error.playfabStage || "lookup",
         missingConfig: error.missingConfig || []
       });
     }
@@ -1508,9 +1535,18 @@ app.use((request, response) => {
   response.sendFile(path.join(__dirname, "index.html"));
 });
 
-app.use((error, _request, response, _next) => {
+app.use((error, request, response, _next) => {
   console.error(error);
-  response.status(500).json({ error: "Server error." });
+  if (request.path.startsWith("/api/playfab")) {
+    response.status(error.statusCode || 502).json({
+      error: error.message || "PlayFab request failed.",
+      playfabStage: error.playfabStage || "server",
+      missingConfig: error.missingConfig || []
+    });
+    return;
+  }
+
+  response.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : "Server error." });
 });
 
 app.listen(port, () => {
