@@ -177,7 +177,8 @@ function renderSubmissions() {
       <div class="admin-actions">
         ${
           submission.playfabId
-            ? `<button class="mini-button" type="button" data-stats-action="fetch" data-id="${submission.id}">Fetch PlayFab</button>`
+            ? `<button class="mini-button" type="button" data-stats-action="fetch" data-id="${submission.id}">Fetch PlayFab</button>
+               <button class="mini-button" type="button" data-stats-action="refresh" data-id="${submission.id}" data-force="1">Refresh PlayFab</button>`
             : ""
         }
         <button class="mini-button mini-button--approve" type="button" data-submission-action="approve" data-id="${submission.id}">Approve</button>
@@ -310,12 +311,13 @@ submissionList.addEventListener("click", (event) => {
   }
 });
 
-async function fetchPlayfabForSubmission(submission, button, result, attempt = 0) {
+async function fetchPlayfabForSubmission(submission, button, result, attempt = 0, forceRefresh = false) {
   const maxAttempts = 30;
   button.disabled = true;
-  if (result && attempt === 0) result.textContent = "Fetching PlayFab profile...";
+  if (result && attempt === 0) result.textContent = forceRefresh ? "Refreshing PlayFab profile..." : "Fetching PlayFab profile...";
   try {
-    const data = await api(`/api/playfab/${encodeURIComponent(submission.playfabId)}`);
+    const forceQuery = forceRefresh ? "?force=1" : "";
+    const data = await api(`/api/playfab/${encodeURIComponent(submission.playfabId)}${forceQuery}`);
     if (data.pending) {
       if (result) {
         const stage = data.playfabStage ? ` [${escapeHtml(data.playfabStage)}]` : "";
@@ -324,7 +326,7 @@ async function fetchPlayfabForSubmission(submission, button, result, attempt = 0
       if (attempt < maxAttempts) {
         clearTimeout(playfabRetryTimers.get(submission.id));
         const timer = setTimeout(() => {
-          fetchPlayfabForSubmission(submission, button, result, attempt + 1);
+          fetchPlayfabForSubmission(submission, button, result, attempt + 1, forceRefresh);
         }, 4000);
         playfabRetryTimers.set(submission.id, timer);
         return;
@@ -352,6 +354,7 @@ async function fetchPlayfabForSubmission(submission, button, result, attempt = 0
       result.innerHTML = `
         <span>PlayFab: ${escapeHtml(profile.displayName || "No display name")} ${data.source !== "playfab" ? `(${escapeHtml(data.source)})` : ""}</span>
         <span>${stats.length ? `${stats.length} stats returned` : "Stats are restricted by Chivalry's PlayFab settings"}</span>
+        ${data.fetchedAt ? `<span>Checked: ${escapeHtml(new Date(data.fetchedAt).toLocaleString())}</span>` : ""}
         ${profile.lastLogin ? `<span>Last login: ${escapeHtml(new Date(profile.lastLogin).toLocaleString())}</span>` : ""}
         ${data.warning ? `<span>${escapeHtml(data.warning)}</span>` : ""}
       `;
@@ -379,9 +382,10 @@ submissionList.addEventListener("click", async (event) => {
   if (!submission?.playfabId) return;
 
   const result = document.querySelector(`#playfab-result-${CSS.escape(submission.id)}`);
+  const forceRefresh = button.dataset.force === "1";
   clearTimeout(playfabRetryTimers.get(submission.id));
   playfabRetryTimers.delete(submission.id);
-  await fetchPlayfabForSubmission(submission, button, result);
+  await fetchPlayfabForSubmission(submission, button, result, 0, forceRefresh);
 });
 
 adminListType.addEventListener("change", async () => {
