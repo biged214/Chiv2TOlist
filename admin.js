@@ -16,6 +16,7 @@ let regions = [];
 let currentListType = "team_objective";
 let isAdmin = false;
 const playfabRetryTimers = new Map();
+let latestPlayerPlayfabName = "";
 
 const playerForm = document.querySelector("#playerForm");
 const adminListType = document.querySelector("#adminListType");
@@ -30,6 +31,7 @@ const playerPlayfabTools = document.querySelector("#playerPlayfabTools");
 const playerPlayfabResult = document.querySelector("#playerPlayfabResult");
 const fetchPlayerPlayfab = document.querySelector("#fetchPlayerPlayfab");
 const refreshPlayerPlayfab = document.querySelector("#refreshPlayerPlayfab");
+const applyPlayerPlayfabName = document.querySelector("#applyPlayerPlayfabName");
 const playerDiscordUsername = document.querySelector("#playerDiscordUsername");
 const playerNotes = document.querySelector("#playerNotes");
 const adminList = document.querySelector("#adminList");
@@ -47,6 +49,21 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function displayNameFromPlayfab(profile = {}, playfabId = "") {
+  const displayName = String(profile.displayName || "").trim();
+  if (!displayName) return "";
+
+  const separator = displayName.lastIndexOf(":");
+  if (separator === -1) return displayName.slice(0, 40);
+
+  const name = displayName.slice(0, separator).trim();
+  const suffix = displayName.slice(separator + 1).trim();
+  const playfab = String(playfabId || "").trim().toUpperCase();
+  const looksLikePlayfabSuffix = /^[a-fA-F0-9]{8,64}$/.test(suffix) && (!playfab || playfab.startsWith(suffix.toUpperCase()));
+
+  return (looksLikePlayfabSuffix && name ? name : displayName).slice(0, 40);
 }
 
 async function api(path, options = {}) {
@@ -197,6 +214,7 @@ function clearForm() {
   playerForm.reset();
   playerId.value = "";
   playerTier.value = tiers[2]?.id || tiers[0]?.id || "b";
+  latestPlayerPlayfabName = "";
   playerPlayfabResult.textContent = "";
   updatePlayerPlayfabTools();
 }
@@ -206,6 +224,7 @@ function updatePlayerPlayfabTools() {
   playerPlayfabTools.hidden = !hasPlayfabId;
   fetchPlayerPlayfab.disabled = !hasPlayfabId;
   refreshPlayerPlayfab.disabled = !hasPlayfabId;
+  applyPlayerPlayfabName.disabled = !latestPlayerPlayfabName;
 }
 
 async function refreshPlayers() {
@@ -263,6 +282,7 @@ playerForm.addEventListener("submit", (event) => {
 });
 
 playerPlayfabId.addEventListener("input", () => {
+  latestPlayerPlayfabName = "";
   playerPlayfabResult.textContent = "";
   updatePlayerPlayfabTools();
 });
@@ -283,6 +303,7 @@ adminList.addEventListener("click", (event) => {
     playerPlayfabId.value = player.playfabId || "";
     playerDiscordUsername.value = player.discordUsername || "";
     playerNotes.value = player.notes;
+    latestPlayerPlayfabName = "";
     playerPlayfabResult.textContent = "";
     updatePlayerPlayfabTools();
     playerName.focus();
@@ -331,7 +352,7 @@ submissionList.addEventListener("click", (event) => {
   }
 });
 
-async function fetchPlayfabForSubmission(submission, button, result, attempt = 0, forceRefresh = false) {
+async function fetchPlayfabForSubmission(submission, button, result, attempt = 0, forceRefresh = false, onSuccess = null) {
   const maxAttempts = 30;
   button.disabled = true;
   if (result && attempt === 0) result.textContent = forceRefresh ? "Refreshing PlayFab profile..." : "Fetching PlayFab profile...";
@@ -346,13 +367,13 @@ async function fetchPlayfabForSubmission(submission, button, result, attempt = 0
       if (attempt < maxAttempts) {
         clearTimeout(playfabRetryTimers.get(submission.id));
         const timer = setTimeout(() => {
-          fetchPlayfabForSubmission(submission, button, result, attempt + 1, forceRefresh);
+          fetchPlayfabForSubmission(submission, button, result, attempt + 1, forceRefresh, onSuccess);
         }, 4000);
         playfabRetryTimers.set(submission.id, timer);
-        return;
+        return null;
       }
       if (result) result.textContent = "PlayFab session did not become ready. Try Fetch PlayFab again.";
-      return;
+      return null;
     }
 
     clearTimeout(playfabRetryTimers.get(submission.id));
@@ -365,7 +386,7 @@ async function fetchPlayfabForSubmission(submission, button, result, attempt = 0
           : "";
         result.textContent = `${data.error || "PlayFab lookup failed."}${stage}${missing}`;
       }
-      return;
+      return null;
     }
 
     const profile = data.profile || {};
@@ -379,6 +400,8 @@ async function fetchPlayfabForSubmission(submission, button, result, attempt = 0
         ${data.warning ? `<span>${escapeHtml(data.warning)}</span>` : ""}
       `;
     }
+    if (onSuccess) onSuccess(data);
+    return data;
   } catch (error) {
     clearTimeout(playfabRetryTimers.get(submission.id));
     playfabRetryTimers.delete(submission.id);
@@ -389,6 +412,7 @@ async function fetchPlayfabForSubmission(submission, button, result, attempt = 0
         : "";
       result.textContent = `${error.message}${stage}${missing}`;
     }
+    return null;
   } finally {
     if (!playfabRetryTimers.has(submission.id)) button.disabled = false;
   }
@@ -420,7 +444,12 @@ async function fetchPlayerFormPlayfab(forceRefresh = false) {
     playfabId
   };
   const button = forceRefresh ? refreshPlayerPlayfab : fetchPlayerPlayfab;
-  await fetchPlayfabForSubmission(lookup, button, playerPlayfabResult, 0, forceRefresh);
+  latestPlayerPlayfabName = "";
+  updatePlayerPlayfabTools();
+  await fetchPlayfabForSubmission(lookup, button, playerPlayfabResult, 0, forceRefresh, (data) => {
+    latestPlayerPlayfabName = displayNameFromPlayfab(data.profile, playfabId);
+    updatePlayerPlayfabTools();
+  });
 }
 
 fetchPlayerPlayfab.addEventListener("click", () => {
@@ -433,6 +462,12 @@ refreshPlayerPlayfab.addEventListener("click", () => {
   fetchPlayerFormPlayfab(true).catch((error) => {
     playerPlayfabResult.textContent = error.message;
   });
+});
+
+applyPlayerPlayfabName.addEventListener("click", () => {
+  if (!latestPlayerPlayfabName) return;
+  playerName.value = latestPlayerPlayfabName;
+  playerName.focus();
 });
 
 adminListType.addEventListener("change", async () => {
