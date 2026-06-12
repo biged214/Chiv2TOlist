@@ -60,7 +60,8 @@ const steamConfig = {
   password: envValue("STEAM_PASSWORD", "steam_password"),
   sharedSecret:
     envValue("STEAM_SHARED_SECRET", "steam_shared_secret", "STEAM_IDENTITY_SECRET", "steam_identity_secret"),
-  refreshToken: envValue("STEAM_REFRESH_TOKEN", "steam_refresh_token")
+  refreshToken: envValue("STEAM_REFRESH_TOKEN", "steam_refresh_token"),
+  ticketMode: envValue("PLAYFAB_STEAM_TICKET_MODE", "playfab_steam_ticket_mode") || "session"
 };
 let steamClientPromise;
 let playfabSessionPromise;
@@ -933,6 +934,12 @@ function playfabServiceError(message, statusCode = 502, playfabStage = "lookup")
   return Object.assign(new Error(message), { statusCode, playfabStage });
 }
 
+function sanitizeExternalError(value) {
+  return cleanText(value, 2000)
+    .replace(/authentication ticket\s+[a-fA-F0-9]{40,}/g, "authentication ticket [redacted]")
+    .replace(/[a-fA-F0-9]{160,}/g, "[redacted-ticket]");
+}
+
 function fetchTimeoutSignal(milliseconds = 20000) {
   if (AbortSignal.timeout) return AbortSignal.timeout(milliseconds);
 
@@ -1057,7 +1064,7 @@ async function getSteamClient() {
 
 async function createSteamTicket() {
   const client = await getSteamClient();
-  try {
+  if (steamConfig.ticketMode === "encrypted") {
     updatePlayfabWarmupStatus({
       state: "warming",
       message: "Requesting encrypted Chivalry 2 Steam app ticket.",
@@ -1066,28 +1073,47 @@ async function createSteamTicket() {
     const result = await client.createEncryptedAppTicket(steamConfig.appId);
     updatePlayfabWarmupStatus({
       state: "warming",
-      message: "Steam app ticket received. Logging into PlayFab.",
+      message: "Encrypted Steam app ticket received. Logging into PlayFab.",
       playfabStage: "playfab-login"
     });
     return result.encryptedAppTicket.toString("hex");
-  } catch (encryptedError) {
-    console.warn("Encrypted Steam app ticket failed, trying auth session ticket:", encryptedError.message);
+  }
+
+  try {
+    updatePlayfabWarmupStatus({
+      state: "warming",
+      message: "Requesting Chivalry 2 Steam auth session ticket.",
+      playfabStage: "steam-ticket"
+    });
+    const result = await client.createAuthSessionTicket(steamConfig.appId);
+    updatePlayfabWarmupStatus({
+      state: "warming",
+      message: "Steam auth session ticket received. Logging into PlayFab.",
+      playfabStage: "playfab-login"
+    });
+    return result.sessionTicket.toString("hex");
+  } catch (sessionError) {
+    if (steamConfig.ticketMode !== "both") {
+      throw playfabServiceError(`Steam auth session ticket failed: ${sanitizeExternalError(sessionError.message)}`, 502, "steam-ticket");
+    }
+
+    console.warn("Steam auth session ticket failed, trying encrypted app ticket:", sessionError.message);
     try {
       updatePlayfabWarmupStatus({
         state: "warming",
-        message: "Encrypted Steam app ticket failed. Trying Steam auth session ticket.",
+        message: "Steam auth session ticket failed. Trying encrypted app ticket.",
         playfabStage: "steam-ticket"
       });
-      const result = await client.createAuthSessionTicket(steamConfig.appId);
+      const result = await client.createEncryptedAppTicket(steamConfig.appId);
       updatePlayfabWarmupStatus({
         state: "warming",
-        message: "Steam session ticket received. Logging into PlayFab.",
+        message: "Encrypted Steam app ticket received. Logging into PlayFab.",
         playfabStage: "playfab-login"
       });
-      return result.sessionTicket.toString("hex");
-    } catch (sessionError) {
+      return result.encryptedAppTicket.toString("hex");
+    } catch (encryptedError) {
       throw playfabServiceError(
-        `Steam ticket failed: encrypted ticket: ${encryptedError.message}; session ticket: ${sessionError.message}`,
+        `Steam ticket failed: session ticket: ${sanitizeExternalError(sessionError.message)}; encrypted ticket: ${sanitizeExternalError(encryptedError.message)}`,
         502,
         "steam-ticket"
       );
@@ -1121,7 +1147,7 @@ async function loginPlayfabWithSteam() {
   }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.error) {
-    const message = payload.errorMessage || payload.error || `PlayFab Steam login returned ${response.status}`;
+    const message = sanitizeExternalError(payload.errorMessage || payload.error || `PlayFab Steam login returned ${response.status}`);
     throw playfabServiceError(`PlayFab Steam login failed: ${message}`, response.status || 502, "playfab-login");
   }
   if (!payload.data?.SessionTicket) {
@@ -1228,7 +1254,7 @@ async function fetchPlayfabProfile(playfabId) {
   }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.error) {
-    const message = payload.errorMessage || payload.error || `PlayFab returned ${response.status}`;
+    const message = sanitizeExternalError(payload.errorMessage || payload.error || `PlayFab returned ${response.status}`);
     throw playfabServiceError(`PlayFab profile lookup failed: ${message}`, response.status || 502, "playfab-profile");
   }
 
