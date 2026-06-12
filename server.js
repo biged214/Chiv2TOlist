@@ -61,7 +61,10 @@ const steamConfig = {
   sharedSecret:
     envValue("STEAM_SHARED_SECRET", "steam_shared_secret", "STEAM_IDENTITY_SECRET", "steam_identity_secret"),
   refreshToken: envValue("STEAM_REFRESH_TOKEN", "steam_refresh_token"),
-  ticketMode: envValue("PLAYFAB_STEAM_TICKET_MODE", "playfab_steam_ticket_mode") || "session"
+  ticketMode: envValue("PLAYFAB_STEAM_TICKET_MODE", "playfab_steam_ticket_mode") || "session",
+  ticketIsServiceSpecific: ["1", "true", "yes"].includes(
+    envValue("PLAYFAB_STEAM_TICKET_SERVICE_SPECIFIC", "playfab_steam_ticket_service_specific").toLowerCase()
+  )
 };
 let steamClientPromise;
 let playfabSessionPromise;
@@ -1139,6 +1142,7 @@ async function loginPlayfabWithSteam() {
       body: JSON.stringify({
         TitleId: playfabConfig.titleId,
         SteamTicket: steamTicket,
+        TicketIsServiceSpecific: steamConfig.ticketIsServiceSpecific,
         CreateAccount: false
       })
     });
