@@ -29,6 +29,23 @@ const listTypes = [
   { id: "ranked_duelist", label: "Ranked Duelists", path: "/ranked-duelists" }
 ];
 const defaultRegions = ["NA East", "NA Central", "NA West", "EU", "OCE", "SA", "SEA"];
+const defaultLeaderboardStats = [
+  "Score",
+  "Kills",
+  "Wins",
+  "Deaths",
+  "Level",
+  "Rank",
+  "XP",
+  "Experience",
+  "GlobalScore",
+  "TotalScore",
+  "LeaderboardScore",
+  "DuelRank",
+  "DuelRating",
+  "RankedDuelRating",
+  "TeamObjectiveScore"
+];
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, "data");
 const playersFile = path.join(dataDir, "players.json");
 const submissionsFile = path.join(dataDir, "submissions.json");
@@ -52,7 +69,8 @@ const playfabConfig = {
   titleId: envValue("PLAYFAB_TITLE_ID", "playfab_title_id"),
   sessionTicket: envValue("PLAYFAB_SESSION_TICKET", "playfab_session_ticket"),
   cacheMinutes: Number(envValue("PLAYFAB_CACHE_MINUTES", "playfab_cache_minutes") || "360"),
-  sessionMinutes: Number(envValue("PLAYFAB_SESSION_MINUTES", "playfab_session_minutes") || "120")
+  sessionMinutes: Number(envValue("PLAYFAB_SESSION_MINUTES", "playfab_session_minutes") || "120"),
+  leaderboardStats: envValue("PLAYFAB_LEADERBOARD_STATS", "playfab_leaderboard_stats")
 };
 const steamConfig = {
   appId: Number(envValue("CHIVALRY2_STEAM_APP_ID", "chivalry2_steam_app_id", "STEAM_APP_ID", "steam_app_id") || "1824220"),
@@ -946,6 +964,14 @@ function sanitizeExternalError(value) {
     .replace(/[a-fA-F0-9]{160,}/g, "[redacted-ticket]");
 }
 
+function leaderboardStatNames() {
+  const configured = playfabConfig.leaderboardStats
+    .split(",")
+    .map((name) => cleanText(name, 80))
+    .filter(Boolean);
+  return [...new Set(configured.length ? configured : defaultLeaderboardStats)];
+}
+
 function fetchTimeoutSignal(milliseconds = 20000) {
   if (AbortSignal.timeout) return AbortSignal.timeout(milliseconds);
 
@@ -1267,12 +1293,111 @@ async function fetchPlayfabProfile(playfabId) {
   return summarizePlayfabProfile(payload.data?.PlayerProfile, playfabId);
 }
 
+async function fetchPlayfabLeaderboard(statisticName, playfabId) {
+  const sessionTicket = await getPlayfabSessionTicket();
+  let response;
+  try {
+    response = await fetch(`https://${playfabConfig.titleId}.playfabapi.com/Client/GetLeaderboard`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Authorization": sessionTicket
+      },
+      signal: fetchTimeoutSignal(),
+      body: JSON.stringify({
+        StatisticName: statisticName,
+        StartPosition: 0,
+        MaxResultsCount: 100,
+        ProfileConstraints: {
+          ShowDisplayName: true,
+          ShowLastLogin: true,
+          ShowAvatarUrl: true
+        }
+      })
+    });
+  } catch (error) {
+    throw playfabServiceError(`Leaderboard request failed: ${error.message}`, 502, "playfab-leaderboard");
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.error) {
+    const message = sanitizeExternalError(payload.errorMessage || payload.error || `PlayFab returned ${response.status}`);
+    throw playfabServiceError(message, response.status || 502, "playfab-leaderboard");
+  }
+
+  const leaderboard = Array.isArray(payload.data?.Leaderboard) ? payload.data.Leaderboard : [];
+  const targetId = playfabId.toUpperCase();
+  return {
+    statisticName,
+    totalReturned: leaderboard.length,
+    version: payload.data?.Version,
+    nextReset: payload.data?.NextReset || "",
+    match:
+      leaderboard.find((entry) => String(entry.PlayFabId || "").toUpperCase() === targetId) || null,
+    sample: leaderboard.slice(0, 5).map((entry) => ({
+      playfabId: entry.PlayFabId,
+      displayName: entry.DisplayName || entry.Profile?.DisplayName || "",
+      position: entry.Position,
+      value: entry.StatValue
+    }))
+  };
+}
+
 app.get("/api/config", (_request, response) => {
   response.json({ tiers, listTypes });
 });
 
 app.get("/api/playfab-status", requireAdmin, (_request, response) => {
   response.json(playfabConfigStatus());
+});
+
+app.get("/api/playfab-leaderboards/:playfabId", requireAdmin, async (request, response, next) => {
+  try {
+    const playfabId = cleanPlayfabId(request.params.playfabId);
+    if (!playfabId) {
+      response.status(400).json({ error: "PlayFab ID is required." });
+      return;
+    }
+
+    if (!hasReadyPlayfabSession()) {
+      if (!hasSteamPlayfabConfig()) {
+        throw playfabConfigError();
+      }
+
+      void warmPlayfabSession().catch(() => {});
+      response.json({
+        pending: true,
+        playfabStage: "session-warmup",
+        message: "Steam/PlayFab login is warming up. Try the leaderboard probe again shortly.",
+        warmupStatus: playfabWarmupStatus
+      });
+      return;
+    }
+
+    const statNames = leaderboardStatNames().slice(0, 25);
+    const results = [];
+    for (const statisticName of statNames) {
+      try {
+        results.push(await fetchPlayfabLeaderboard(statisticName, playfabId));
+      } catch (error) {
+        results.push({
+          statisticName,
+          error: error.message,
+          playfabStage: error.playfabStage || "playfab-leaderboard"
+        });
+      }
+    }
+
+    response.json({
+      playfabId,
+      checkedAt: new Date().toISOString(),
+      statNames,
+      matches: results.filter((result) => result.match),
+      results
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get("/api/playfab/:playfabId", requireAdmin, async (request, response, next) => {

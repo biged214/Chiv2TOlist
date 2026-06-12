@@ -31,6 +31,7 @@ const playerPlayfabTools = document.querySelector("#playerPlayfabTools");
 const playerPlayfabResult = document.querySelector("#playerPlayfabResult");
 const fetchPlayerPlayfab = document.querySelector("#fetchPlayerPlayfab");
 const refreshPlayerPlayfab = document.querySelector("#refreshPlayerPlayfab");
+const probePlayerLeaderboards = document.querySelector("#probePlayerLeaderboards");
 const applyPlayerPlayfabName = document.querySelector("#applyPlayerPlayfabName");
 const playerDiscordUsername = document.querySelector("#playerDiscordUsername");
 const playerNotes = document.querySelector("#playerNotes");
@@ -224,6 +225,7 @@ function updatePlayerPlayfabTools() {
   playerPlayfabTools.hidden = !hasPlayfabId;
   fetchPlayerPlayfab.disabled = !hasPlayfabId;
   refreshPlayerPlayfab.disabled = !hasPlayfabId;
+  probePlayerLeaderboards.disabled = !hasPlayfabId;
   applyPlayerPlayfabName.disabled = !latestPlayerPlayfabName;
 }
 
@@ -460,6 +462,50 @@ fetchPlayerPlayfab.addEventListener("click", () => {
 
 refreshPlayerPlayfab.addEventListener("click", () => {
   fetchPlayerFormPlayfab(true).catch((error) => {
+    playerPlayfabResult.textContent = error.message;
+  });
+});
+
+async function probePlayerFormLeaderboards() {
+  const playfabId = playerPlayfabId.value.trim();
+  if (!playfabId) {
+    updatePlayerPlayfabTools();
+    return;
+  }
+
+  probePlayerLeaderboards.disabled = true;
+  playerPlayfabResult.textContent = "Probing PlayFab leaderboards...";
+  try {
+    const data = await api(`/api/playfab-leaderboards/${encodeURIComponent(playfabId)}`);
+    if (data.pending) {
+      const stage = data.playfabStage ? ` [${escapeHtml(data.playfabStage)}]` : "";
+      playerPlayfabResult.textContent = `${data.message || "PlayFab session is warming up."}${stage}`;
+      return;
+    }
+
+    const matches = Array.isArray(data.matches) ? data.matches : [];
+    const results = Array.isArray(data.results) ? data.results : [];
+    const errors = results.filter((item) => item.error).slice(0, 5);
+    const samples = results.filter((item) => !item.error && item.totalReturned).slice(0, 5);
+    playerPlayfabResult.innerHTML = `
+      <span>Leaderboard probe checked ${results.length} statistic names.</span>
+      <span>${matches.length ? `${matches.length} matching leaderboards found.` : "No matching leaderboard entries found yet."}</span>
+      ${matches
+        .map((item) => `<span>${escapeHtml(item.statisticName)}: rank ${escapeHtml(item.match.Position)} value ${escapeHtml(item.match.StatValue)}</span>`)
+        .join("")}
+      ${samples.length && !matches.length ? `<span>Some leaderboards returned data: ${samples.map((item) => escapeHtml(item.statisticName)).join(", ")}</span>` : ""}
+      ${errors.length ? `<span>Some names failed: ${errors.map((item) => escapeHtml(item.statisticName)).join(", ")}</span>` : ""}
+      ${data.checkedAt ? `<span>Checked: ${escapeHtml(new Date(data.checkedAt).toLocaleString())}</span>` : ""}
+    `;
+  } catch (error) {
+    playerPlayfabResult.textContent = error.message;
+  } finally {
+    updatePlayerPlayfabTools();
+  }
+}
+
+probePlayerLeaderboards.addEventListener("click", () => {
+  probePlayerFormLeaderboards().catch((error) => {
     playerPlayfabResult.textContent = error.message;
   });
 });
