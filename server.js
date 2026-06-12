@@ -64,6 +64,9 @@ const steamConfig = {
   ticketMode: envValue("PLAYFAB_STEAM_TICKET_MODE", "playfab_steam_ticket_mode") || "session",
   ticketIsServiceSpecific: ["1", "true", "yes"].includes(
     envValue("PLAYFAB_STEAM_TICKET_SERVICE_SPECIFIC", "playfab_steam_ticket_service_specific").toLowerCase()
+  ),
+  createPlayfabAccount: !["0", "false", "no"].includes(
+    envValue("PLAYFAB_STEAM_CREATE_ACCOUNT", "playfab_steam_create_account").toLowerCase()
   )
 };
 let steamClientPromise;
@@ -1143,7 +1146,7 @@ async function loginPlayfabWithSteam() {
         TitleId: playfabConfig.titleId,
         SteamTicket: steamTicket,
         TicketIsServiceSpecific: steamConfig.ticketIsServiceSpecific,
-        CreateAccount: false
+        CreateAccount: steamConfig.createPlayfabAccount
       })
     });
   } catch (error) {

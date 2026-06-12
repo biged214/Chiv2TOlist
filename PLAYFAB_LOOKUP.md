@@ -16,6 +16,7 @@ Set these in GoDaddy when you are ready to enable live PlayFab lookups:
 - `STEAM_REFRESH_TOKEN`: Optional. After a successful local username/password login, the server can print a refresh token in non-production logs. Save it as a GoDaddy secret to make future hosted Steam logins more reliable.
 - `PLAYFAB_STEAM_TICKET_MODE`: Optional. Defaults to `session`, which uses Steam auth session tickets. Use `encrypted` only if the PlayFab exchange specifically requires encrypted app tickets. Use `both` to try session first, then encrypted only if the Steam session ticket request fails.
 - `PLAYFAB_STEAM_TICKET_SERVICE_SPECIFIC`: Optional. Defaults to false. Only set to `true` if the ticket was generated with Steam's `GetAuthTicketForWebAPI("AzurePlayFab")` flow.
+- `PLAYFAB_STEAM_CREATE_ACCOUNT`: Optional. Defaults to true so the dedicated Steam bot can create/link its PlayFab account on first login. Set to `false` only after the bot has already been linked and you want to prevent account creation.
 - `PLAYFAB_SESSION_TICKET`: Optional manual fallback. If set, the server uses this directly instead of logging into Steam.
 - `PLAYFAB_CACHE_MINUTES`: Optional cache duration. Defaults to `360`.
 - `PLAYFAB_SESSION_MINUTES`: Optional in-memory PlayFab session duration. Defaults to `120`.
