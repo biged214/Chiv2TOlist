@@ -1343,6 +1343,55 @@ async function fetchPlayfabLeaderboard(statisticName, playfabId) {
   };
 }
 
+async function fetchPlayfabLeaderboardAroundPlayer(statisticName, playfabId) {
+  const sessionTicket = await getPlayfabSessionTicket();
+  let response;
+  try {
+    response = await fetch(`https://${playfabConfig.titleId}.playfabapi.com/Client/GetLeaderboardAroundPlayer`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Authorization": sessionTicket
+      },
+      signal: fetchTimeoutSignal(),
+      body: JSON.stringify({
+        StatisticName: statisticName,
+        PlayFabId: playfabId,
+        MaxResultsCount: 15,
+        ProfileConstraints: {
+          ShowDisplayName: true,
+          ShowLastLogin: true,
+          ShowAvatarUrl: true
+        }
+      })
+    });
+  } catch (error) {
+    throw playfabServiceError(`Leaderboard around-player request failed: ${error.message}`, 502, "playfab-leaderboard-around-player");
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.error) {
+    const message = sanitizeExternalError(payload.errorMessage || payload.error || `PlayFab returned ${response.status}`);
+    throw playfabServiceError(message, response.status || 502, "playfab-leaderboard-around-player");
+  }
+
+  const leaderboard = Array.isArray(payload.data?.Leaderboard) ? payload.data.Leaderboard : [];
+  const targetId = playfabId.toUpperCase();
+  return {
+    totalReturned: leaderboard.length,
+    version: payload.data?.Version,
+    nextReset: payload.data?.NextReset || "",
+    match:
+      leaderboard.find((entry) => String(entry.PlayFabId || "").toUpperCase() === targetId) || null,
+    sample: leaderboard.map((entry) => ({
+      playfabId: entry.PlayFabId,
+      displayName: entry.DisplayName || entry.Profile?.DisplayName || "",
+      position: entry.Position,
+      value: entry.StatValue
+    }))
+  };
+}
+
 app.get("/api/config", (_request, response) => {
   response.json({ tiers, listTypes });
 });
@@ -1378,7 +1427,15 @@ app.get("/api/playfab-leaderboards/:playfabId", requireAdmin, async (request, re
     const results = [];
     for (const statisticName of statNames) {
       try {
-        results.push(await fetchPlayfabLeaderboard(statisticName, playfabId));
+        const result = await fetchPlayfabLeaderboard(statisticName, playfabId);
+        if (result.totalReturned) {
+          try {
+            result.aroundPlayer = await fetchPlayfabLeaderboardAroundPlayer(statisticName, playfabId);
+          } catch (error) {
+            result.aroundPlayerError = error.message;
+          }
+        }
+        results.push(result);
       } catch (error) {
         results.push({
           statisticName,
@@ -1392,7 +1449,7 @@ app.get("/api/playfab-leaderboards/:playfabId", requireAdmin, async (request, re
       playfabId,
       checkedAt: new Date().toISOString(),
       statNames,
-      matches: results.filter((result) => result.match),
+      matches: results.filter((result) => result.match || result.aroundPlayer?.match),
       results
     });
   } catch (error) {

@@ -487,14 +487,20 @@ async function probePlayerFormLeaderboards() {
     const results = Array.isArray(data.results) ? data.results : [];
     const errors = results.filter((item) => item.error).slice(0, 5);
     const samples = results.filter((item) => !item.error && item.totalReturned).slice(0, 5);
+    const aroundPlayerErrors = results.filter((item) => item.aroundPlayerError).slice(0, 5);
     playerPlayfabResult.innerHTML = `
       <span>Leaderboard probe checked ${results.length} statistic names.</span>
       <span>${matches.length ? `${matches.length} matching leaderboards found.` : "No matching leaderboard entries found yet."}</span>
       ${matches
-        .map((item) => `<span>${escapeHtml(item.statisticName)}: rank ${escapeHtml(item.match.Position)} value ${escapeHtml(item.match.StatValue)}</span>`)
+        .map((item) => {
+          const match = item.match || item.aroundPlayer?.match;
+          const source = item.match ? "top 100" : "around player";
+          return `<span>${escapeHtml(item.statisticName)} (${source}): rank ${escapeHtml(match.Position)} value ${escapeHtml(match.StatValue)}</span>`;
+        })
         .join("")}
       ${samples.length && !matches.length ? `<span>Some leaderboards returned data: ${samples.map((item) => escapeHtml(item.statisticName)).join(", ")}</span>` : ""}
       ${errors.length ? `<span>Some names failed: ${errors.map((item) => escapeHtml(item.statisticName)).join(", ")}</span>` : ""}
+      ${aroundPlayerErrors.length ? `<span>Around-player lookup failed for: ${aroundPlayerErrors.map((item) => escapeHtml(item.statisticName)).join(", ")}</span>` : ""}
       ${data.checkedAt ? `<span>Checked: ${escapeHtml(new Date(data.checkedAt).toLocaleString())}</span>` : ""}
     `;
   } catch (error) {
