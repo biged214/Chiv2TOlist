@@ -15,6 +15,7 @@ let submissions = [];
 let regions = [];
 let currentListType = "team_objective";
 let isAdmin = false;
+const playfabRetryTimers = new Map();
 
 const playerForm = document.querySelector("#playerForm");
 const adminListType = document.querySelector("#adminListType");
@@ -143,6 +144,8 @@ function renderAdminList() {
 }
 
 function renderSubmissions() {
+  playfabRetryTimers.forEach((timer) => clearTimeout(timer));
+  playfabRetryTimers.clear();
   submissionList.innerHTML = "";
 
   if (!submissions.length) {
@@ -307,27 +310,31 @@ submissionList.addEventListener("click", (event) => {
   }
 });
 
-submissionList.addEventListener("click", async (event) => {
-  const button = event.target.closest("button[data-stats-action]");
-  if (!button) return;
-
-  const submission = submissions.find((item) => item.id === button.dataset.id);
-  if (!submission?.playfabId) return;
-
-  const result = document.querySelector(`#playfab-result-${CSS.escape(submission.id)}`);
+async function fetchPlayfabForSubmission(submission, button, result, attempt = 0) {
+  const maxAttempts = 30;
   button.disabled = true;
-  if (result) result.textContent = "Fetching PlayFab profile...";
-
+  if (result && attempt === 0) result.textContent = "Fetching PlayFab profile...";
   try {
     const data = await api(`/api/playfab/${encodeURIComponent(submission.playfabId)}`);
     if (data.pending) {
       if (result) {
         const stage = data.playfabStage ? ` [${escapeHtml(data.playfabStage)}]` : "";
-        result.textContent = `${data.message || "PlayFab session is warming up. Try again shortly."}${stage}`;
+        result.textContent = `${data.message || "PlayFab session is warming up. Trying again automatically."}${stage} Checking again...`;
       }
+      if (attempt < maxAttempts) {
+        clearTimeout(playfabRetryTimers.get(submission.id));
+        const timer = setTimeout(() => {
+          fetchPlayfabForSubmission(submission, button, result, attempt + 1);
+        }, 4000);
+        playfabRetryTimers.set(submission.id, timer);
+        return;
+      }
+      if (result) result.textContent = "PlayFab session did not become ready. Try Fetch PlayFab again.";
       return;
     }
 
+    clearTimeout(playfabRetryTimers.get(submission.id));
+    playfabRetryTimers.delete(submission.id);
     if (data.failed) {
       if (result) {
         const stage = data.playfabStage ? ` [${escapeHtml(data.playfabStage)}]` : "";
@@ -350,6 +357,8 @@ submissionList.addEventListener("click", async (event) => {
       `;
     }
   } catch (error) {
+    clearTimeout(playfabRetryTimers.get(submission.id));
+    playfabRetryTimers.delete(submission.id);
     if (result) {
       const stage = error.playfabStage ? ` [${error.playfabStage}]` : "";
       const missing = Array.isArray(error.missingConfig) && error.missingConfig.length
@@ -358,8 +367,21 @@ submissionList.addEventListener("click", async (event) => {
       result.textContent = `${error.message}${stage}${missing}`;
     }
   } finally {
-    button.disabled = false;
+    if (!playfabRetryTimers.has(submission.id)) button.disabled = false;
   }
+}
+
+submissionList.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-stats-action]");
+  if (!button) return;
+
+  const submission = submissions.find((item) => item.id === button.dataset.id);
+  if (!submission?.playfabId) return;
+
+  const result = document.querySelector(`#playfab-result-${CSS.escape(submission.id)}`);
+  clearTimeout(playfabRetryTimers.get(submission.id));
+  playfabRetryTimers.delete(submission.id);
+  await fetchPlayfabForSubmission(submission, button, result);
 });
 
 adminListType.addEventListener("change", async () => {
