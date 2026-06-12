@@ -1251,8 +1251,7 @@ async function fetchPlayfabProfile(playfabId) {
         ProfileConstraints: {
           ShowAvatarUrl: true,
           ShowDisplayName: true,
-          ShowLastLogin: true,
-          ShowStatistics: true
+          ShowLastLogin: true
         }
       })
     });

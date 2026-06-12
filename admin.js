@@ -344,7 +344,7 @@ submissionList.addEventListener("click", async (event) => {
     if (result) {
       result.innerHTML = `
         <span>PlayFab: ${escapeHtml(profile.displayName || "No display name")} ${data.source !== "playfab" ? `(${escapeHtml(data.source)})` : ""}</span>
-        <span>${stats.length ? `${stats.length} stats returned` : "No stats returned"}</span>
+        <span>${stats.length ? `${stats.length} stats returned` : "Stats are restricted by Chivalry's PlayFab settings"}</span>
         ${profile.lastLogin ? `<span>Last login: ${escapeHtml(new Date(profile.lastLogin).toLocaleString())}</span>` : ""}
         ${data.warning ? `<span>${escapeHtml(data.warning)}</span>` : ""}
       `;
