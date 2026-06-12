@@ -26,6 +26,10 @@ const playerRegion = document.querySelector("#playerRegion");
 const playerRole = document.querySelector("#playerRole");
 const playerClan = document.querySelector("#playerClan");
 const playerPlayfabId = document.querySelector("#playerPlayfabId");
+const playerPlayfabTools = document.querySelector("#playerPlayfabTools");
+const playerPlayfabResult = document.querySelector("#playerPlayfabResult");
+const fetchPlayerPlayfab = document.querySelector("#fetchPlayerPlayfab");
+const refreshPlayerPlayfab = document.querySelector("#refreshPlayerPlayfab");
 const playerDiscordUsername = document.querySelector("#playerDiscordUsername");
 const playerNotes = document.querySelector("#playerNotes");
 const adminList = document.querySelector("#adminList");
@@ -193,6 +197,15 @@ function clearForm() {
   playerForm.reset();
   playerId.value = "";
   playerTier.value = tiers[2]?.id || tiers[0]?.id || "b";
+  playerPlayfabResult.textContent = "";
+  updatePlayerPlayfabTools();
+}
+
+function updatePlayerPlayfabTools() {
+  const hasPlayfabId = Boolean(playerPlayfabId.value.trim());
+  playerPlayfabTools.hidden = !hasPlayfabId;
+  fetchPlayerPlayfab.disabled = !hasPlayfabId;
+  refreshPlayerPlayfab.disabled = !hasPlayfabId;
 }
 
 async function refreshPlayers() {
@@ -249,6 +262,11 @@ playerForm.addEventListener("submit", (event) => {
   savePlayer(event).catch((error) => alert(error.message));
 });
 
+playerPlayfabId.addEventListener("input", () => {
+  playerPlayfabResult.textContent = "";
+  updatePlayerPlayfabTools();
+});
+
 adminList.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
@@ -265,6 +283,8 @@ adminList.addEventListener("click", (event) => {
     playerPlayfabId.value = player.playfabId || "";
     playerDiscordUsername.value = player.discordUsername || "";
     playerNotes.value = player.notes;
+    playerPlayfabResult.textContent = "";
+    updatePlayerPlayfabTools();
     playerName.focus();
   }
 
@@ -386,6 +406,33 @@ submissionList.addEventListener("click", async (event) => {
   clearTimeout(playfabRetryTimers.get(submission.id));
   playfabRetryTimers.delete(submission.id);
   await fetchPlayfabForSubmission(submission, button, result, 0, forceRefresh);
+});
+
+async function fetchPlayerFormPlayfab(forceRefresh = false) {
+  const playfabId = playerPlayfabId.value.trim();
+  if (!playfabId) {
+    updatePlayerPlayfabTools();
+    return;
+  }
+
+  const lookup = {
+    id: playerId.value ? `player-${playerId.value}` : `player-form-${playfabId}`,
+    playfabId
+  };
+  const button = forceRefresh ? refreshPlayerPlayfab : fetchPlayerPlayfab;
+  await fetchPlayfabForSubmission(lookup, button, playerPlayfabResult, 0, forceRefresh);
+}
+
+fetchPlayerPlayfab.addEventListener("click", () => {
+  fetchPlayerFormPlayfab(false).catch((error) => {
+    playerPlayfabResult.textContent = error.message;
+  });
+});
+
+refreshPlayerPlayfab.addEventListener("click", () => {
+  fetchPlayerFormPlayfab(true).catch((error) => {
+    playerPlayfabResult.textContent = error.message;
+  });
 });
 
 adminListType.addEventListener("change", async () => {

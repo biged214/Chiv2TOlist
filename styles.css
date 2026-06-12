@@ -425,6 +425,14 @@ textarea {
   font-weight: 700;
 }
 
+.playfab-form-tools {
+  padding-top: 0;
+}
+
+.playfab-form-tools .admin-actions {
+  justify-content: flex-start;
+}
+
 .player-card__actions {
   display: flex;
   justify-content: flex-end;

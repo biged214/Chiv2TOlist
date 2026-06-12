@@ -87,6 +87,13 @@
               <span>PlayFab ID</span>
               <input id="playerPlayfabId" maxlength="64" placeholder="EFEA435B1E22C73C">
             </label>
+            <div class="player-form__wide playfab-form-tools" id="playerPlayfabTools" hidden>
+              <div class="admin-actions">
+                <button class="mini-button" id="fetchPlayerPlayfab" type="button">Fetch PlayFab</button>
+                <button class="mini-button" id="refreshPlayerPlayfab" type="button">Refresh PlayFab</button>
+              </div>
+              <div class="playfab-result" id="playerPlayfabResult"></div>
+            </div>
             <label>
               <span>Discord username</span>
               <input id="playerDiscordUsername" maxlength="64" placeholder="username or display name">
@@ -114,6 +121,6 @@
       </section>
     </main>
 
-    <script src="admin.js?v=playfab-force-refresh-20260612"></script>
+    <script src="admin.js?v=player-playfab-tools-20260612"></script>
   </body>
 </html>
