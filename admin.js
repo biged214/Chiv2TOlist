@@ -42,6 +42,7 @@ const newRegion = document.querySelector("#newRegion");
 const regionList = document.querySelector("#regionList");
 const adminWorkspace = document.querySelector("#adminWorkspace");
 const adminLock = document.querySelector("#adminLock");
+const syncPlayfabNames = document.querySelector("#syncPlayfabNames");
 
 function escapeHtml(value) {
   return String(value)
@@ -618,6 +619,34 @@ document.querySelector("#resetDemo").addEventListener("click", async () => {
     body: JSON.stringify({ listType: currentListType })
   });
   renderAdminList();
+});
+
+syncPlayfabNames.addEventListener("click", async () => {
+  if (!isAdmin) {
+    alert("Unlock admin controls first.");
+    return;
+  }
+
+  syncPlayfabNames.disabled = true;
+  syncPlayfabNames.textContent = "Syncing...";
+  try {
+    const data = await api("/api/playfab-name-sync", { method: "POST" });
+    await refreshPlayers();
+    const result = data.result || {};
+    if (result.skipped) {
+      alert(`PlayFab name sync skipped: ${result.reason || "unknown reason"}.`);
+      return;
+    }
+
+    alert(
+      `PlayFab name sync complete. Checked ${result.checked || 0}, updated ${result.updated || 0}, skipped ${result.skipped || 0}, failed ${result.failed || 0}.`
+    );
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    syncPlayfabNames.disabled = false;
+    syncPlayfabNames.textContent = "Sync PlayFab Names";
+  }
 });
 
 document.querySelector("#exportData").addEventListener("click", async () => {

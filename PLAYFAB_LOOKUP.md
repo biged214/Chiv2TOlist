@@ -18,6 +18,9 @@ Set these in GoDaddy when you are ready to enable live PlayFab lookups:
 - `PLAYFAB_STEAM_TICKET_SERVICE_SPECIFIC`: Optional. Defaults to false. Only set to `true` if the ticket was generated with Steam's `GetAuthTicketForWebAPI("AzurePlayFab")` flow.
 - `PLAYFAB_STEAM_CREATE_ACCOUNT`: Optional. Defaults to true so the dedicated Steam bot can create/link its PlayFab account on first login. Set to `false` only after the bot has already been linked and you want to prevent account creation.
 - `PLAYFAB_LEADERBOARD_STATS`: Optional comma-separated statistic names for the admin leaderboard probe. If omitted, the server tries a small list of common guesses. The probe checks the top leaderboard rows, then tries PlayFab's around-player leaderboard lookup when a stat name returns data.
+- `PLAYFAB_AUTO_NAME_SYNC`: Optional. Defaults to enabled. Set to `false` to stop the automatic player-name refresh job.
+- `PLAYFAB_AUTO_NAME_SYNC_HOURS`: Optional. Defaults to `24`. Controls how often the server refreshes saved player names from PlayFab.
+- `PLAYFAB_AUTO_NAME_SYNC_START_DELAY_SECONDS`: Optional. Defaults to `60`. Controls how long after server start the first automatic name sync runs.
 - `PLAYFAB_SESSION_TICKET`: Optional manual fallback. If set, the server uses this directly instead of logging into Steam.
 - `PLAYFAB_CACHE_MINUTES`: Optional cache duration. Defaults to `360`.
 - `PLAYFAB_SESSION_MINUTES`: Optional in-memory PlayFab session duration. Defaults to `120`.

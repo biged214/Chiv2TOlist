@@ -70,7 +70,12 @@ const playfabConfig = {
   sessionTicket: envValue("PLAYFAB_SESSION_TICKET", "playfab_session_ticket"),
   cacheMinutes: Number(envValue("PLAYFAB_CACHE_MINUTES", "playfab_cache_minutes") || "360"),
   sessionMinutes: Number(envValue("PLAYFAB_SESSION_MINUTES", "playfab_session_minutes") || "120"),
-  leaderboardStats: envValue("PLAYFAB_LEADERBOARD_STATS", "playfab_leaderboard_stats")
+  leaderboardStats: envValue("PLAYFAB_LEADERBOARD_STATS", "playfab_leaderboard_stats"),
+  autoNameSync: envValue("PLAYFAB_AUTO_NAME_SYNC", "playfab_auto_name_sync").toLowerCase() !== "false",
+  autoNameSyncHours: Number(envValue("PLAYFAB_AUTO_NAME_SYNC_HOURS", "playfab_auto_name_sync_hours") || "24"),
+  autoNameSyncStartDelaySeconds: Number(
+    envValue("PLAYFAB_AUTO_NAME_SYNC_START_DELAY_SECONDS", "playfab_auto_name_sync_start_delay_seconds") || "60"
+  )
 };
 const steamConfig = {
   appId: Number(envValue("CHIVALRY2_STEAM_APP_ID", "chivalry2_steam_app_id", "STEAM_APP_ID", "steam_app_id") || "1824220"),
@@ -90,6 +95,7 @@ const steamConfig = {
 let steamClientPromise;
 let playfabSessionPromise;
 let cachedPlayfabSession;
+let playfabNameSyncRunning = false;
 let playfabWarmupStatus = {
   state: "idle",
   message: "",
@@ -856,6 +862,21 @@ function summarizePlayfabProfile(profile = {}, playfabId) {
   };
 }
 
+function displayNameFromPlayfabProfile(profile = {}, playfabId = "") {
+  const displayName = cleanText(profile.displayName || profile.DisplayName || "", 80);
+  if (!displayName) return "";
+
+  const separator = displayName.lastIndexOf(":");
+  if (separator === -1) return cleanText(displayName, 40);
+
+  const name = displayName.slice(0, separator).trim();
+  const suffix = displayName.slice(separator + 1).trim();
+  const playfab = String(playfabId || profile.playfabId || profile.PlayerId || "").trim().toUpperCase();
+  const looksLikePlayfabSuffix = /^[a-fA-F0-9]{8,64}$/.test(suffix) && (!playfab || playfab.startsWith(suffix.toUpperCase()));
+
+  return cleanText(looksLikePlayfabSuffix && name ? name : displayName, 40);
+}
+
 async function readPlayfabCache(playfabId) {
   if (hasDatabase()) {
     return withDatabase(async (connection) => {
@@ -1309,6 +1330,113 @@ async function fetchPlayfabProfile(playfabId) {
   return summarizePlayfabProfile(payload.data?.PlayerProfile, playfabId);
 }
 
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function playfabNameSyncIntervalMs() {
+  return Math.max(1, Number.isFinite(playfabConfig.autoNameSyncHours) ? playfabConfig.autoNameSyncHours : 24) * 60 * 60 * 1000;
+}
+
+function playfabNameSyncStartDelayMs() {
+  return (
+    Math.max(
+      5,
+      Number.isFinite(playfabConfig.autoNameSyncStartDelaySeconds) ? playfabConfig.autoNameSyncStartDelaySeconds : 60
+    ) * 1000
+  );
+}
+
+async function syncPlayfabNames() {
+  if (playfabNameSyncRunning) {
+    console.log("PlayFab name sync skipped because another sync is still running.");
+    return { skipped: true, reason: "already-running" };
+  }
+
+  if (!playfabConfig.autoNameSync) {
+    console.log("PlayFab name sync is disabled.");
+    return { skipped: true, reason: "disabled" };
+  }
+
+  if (!playfabConfig.titleId || (!playfabConfig.sessionTicket && !hasSteamPlayfabConfig())) {
+    console.log("PlayFab name sync skipped because PlayFab lookup is not configured.");
+    return { skipped: true, reason: "not-configured" };
+  }
+
+  playfabNameSyncRunning = true;
+  const summary = {
+    checked: 0,
+    updated: 0,
+    skipped: 0,
+    failed: 0
+  };
+
+  console.log("Starting PlayFab name sync.");
+  try {
+    for (const listType of listTypes) {
+      const players = await readPlayers(listType.id);
+      let changed = false;
+      const nextPlayers = [];
+
+      for (const player of players) {
+        const playfabId = cleanPlayfabId(player.playfabId);
+        if (!playfabId) {
+          summary.skipped += 1;
+          nextPlayers.push(player);
+          continue;
+        }
+
+        summary.checked += 1;
+        try {
+          const profile = await fetchPlayfabProfile(playfabId);
+          await writePlayfabCache(playfabId, profile);
+          const playfabName = displayNameFromPlayfabProfile(profile, playfabId);
+          if (playfabName && playfabName !== player.name) {
+            nextPlayers.push(normalizePlayer({ ...player, name: playfabName }));
+            changed = true;
+            summary.updated += 1;
+            console.log(`Updated ${player.name} to PlayFab name ${playfabName}.`);
+          } else {
+            nextPlayers.push(player);
+          }
+        } catch (error) {
+          summary.failed += 1;
+          nextPlayers.push(player);
+          console.error(`PlayFab name sync failed for ${player.name || player.id}:`, error.message);
+        }
+
+        await sleep(750);
+      }
+
+      if (changed) {
+        await writePlayers(nextPlayers, listType.id);
+      }
+    }
+  } finally {
+    playfabNameSyncRunning = false;
+    console.log(
+      `PlayFab name sync finished. checked=${summary.checked} updated=${summary.updated} skipped=${summary.skipped} failed=${summary.failed}`
+    );
+  }
+
+  return summary;
+}
+
+function startPlayfabNameSyncSchedule() {
+  if (!playfabConfig.autoNameSync) return;
+
+  const interval = playfabNameSyncIntervalMs();
+  const run = () => {
+    syncPlayfabNames().catch((error) => {
+      console.error("PlayFab name sync failed:", error);
+    });
+  };
+
+  setTimeout(run, playfabNameSyncStartDelayMs());
+  setInterval(run, interval);
+  console.log(`PlayFab name sync scheduled every ${Math.round(interval / 60 / 60 / 1000)} hour(s).`);
+}
+
 async function fetchPlayfabLeaderboard(statisticName, playfabId) {
   const sessionTicket = await getPlayfabSessionTicket();
   let response;
@@ -1416,6 +1544,15 @@ app.get("/api/config", (_request, response) => {
 
 app.get("/api/playfab-status", requireAdmin, (_request, response) => {
   response.json(playfabConfigStatus());
+});
+
+app.post("/api/playfab-name-sync", requireAdmin, async (_request, response, next) => {
+  try {
+    const result = await syncPlayfabNames();
+    response.json({ ok: true, result });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get("/api/playfab-leaderboards/:playfabId", requireAdmin, async (request, response, next) => {
@@ -1934,4 +2071,5 @@ app.use((error, request, response, _next) => {
 
 app.listen(port, () => {
   console.log(`Chiv2 tier list server running on port ${port}`);
+  startPlayfabNameSyncSchedule();
 });
