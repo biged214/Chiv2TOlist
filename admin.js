@@ -67,6 +67,37 @@ function displayNameFromPlayfab(profile = {}, playfabId = "") {
   return (looksLikePlayfabSuffix && name ? name : displayName).slice(0, 40);
 }
 
+function leaderboardDebugJson(results = []) {
+  return JSON.stringify(
+    results
+      .filter((item) => !item.error && item.totalReturned)
+      .map((item) => ({
+        statisticName: item.statisticName,
+        topLeaderboard: {
+          request: item.request,
+          totalReturned: item.totalReturned,
+          version: item.version,
+          nextReset: item.nextReset,
+          match: item.match,
+          sample: item.sample
+        },
+        aroundPlayer: item.aroundPlayer
+          ? {
+              request: item.aroundPlayer.request,
+              totalReturned: item.aroundPlayer.totalReturned,
+              version: item.aroundPlayer.version,
+              nextReset: item.aroundPlayer.nextReset,
+              match: item.aroundPlayer.match,
+              sample: item.aroundPlayer.sample
+            }
+          : null,
+        aroundPlayerError: item.aroundPlayerError || ""
+      })),
+    null,
+    2
+  );
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     credentials: "same-origin",
@@ -488,6 +519,7 @@ async function probePlayerFormLeaderboards() {
     const errors = results.filter((item) => item.error).slice(0, 5);
     const samples = results.filter((item) => !item.error && item.totalReturned).slice(0, 5);
     const aroundPlayerErrors = results.filter((item) => item.aroundPlayerError).slice(0, 5);
+    const debugJson = leaderboardDebugJson(results);
     playerPlayfabResult.innerHTML = `
       <span>Leaderboard probe checked ${results.length} statistic names.</span>
       <span>${matches.length ? `${matches.length} matching leaderboards found.` : "No matching leaderboard entries found yet."}</span>
@@ -501,6 +533,11 @@ async function probePlayerFormLeaderboards() {
       ${samples.length && !matches.length ? `<span>Some leaderboards returned data: ${samples.map((item) => escapeHtml(item.statisticName)).join(", ")}</span>` : ""}
       ${errors.length ? `<span>Some names failed: ${errors.map((item) => escapeHtml(item.statisticName)).join(", ")}</span>` : ""}
       ${aroundPlayerErrors.length ? `<span>Around-player lookup failed for: ${aroundPlayerErrors.map((item) => escapeHtml(item.statisticName)).join(", ")}</span>` : ""}
+      ${
+        debugJson && debugJson !== "[]"
+          ? `<details class="playfab-debug"><summary>View returned data</summary><pre>${escapeHtml(debugJson)}</pre></details>`
+          : ""
+      }
       ${data.checkedAt ? `<span>Checked: ${escapeHtml(new Date(data.checkedAt).toLocaleString())}</span>` : ""}
     `;
   } catch (error) {

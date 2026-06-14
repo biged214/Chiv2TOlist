@@ -972,6 +972,22 @@ function leaderboardStatNames() {
   return [...new Set(configured.length ? configured : defaultLeaderboardStats)];
 }
 
+function summarizeLeaderboardEntry(entry) {
+  return {
+    playfabId: entry.PlayFabId,
+    displayName: entry.DisplayName || entry.Profile?.DisplayName || "",
+    position: entry.Position,
+    value: entry.StatValue,
+    profile: entry.Profile
+      ? {
+          displayName: entry.Profile.DisplayName || "",
+          avatarUrl: entry.Profile.AvatarUrl || "",
+          lastLogin: entry.Profile.LastLogin || ""
+        }
+      : null
+  };
+}
+
 function fetchTimeoutSignal(milliseconds = 20000) {
   if (AbortSignal.timeout) return AbortSignal.timeout(milliseconds);
 
@@ -1329,17 +1345,18 @@ async function fetchPlayfabLeaderboard(statisticName, playfabId) {
   const targetId = playfabId.toUpperCase();
   return {
     statisticName,
+    request: {
+      endpoint: "Client/GetLeaderboard",
+      statisticName,
+      startPosition: 0,
+      maxResultsCount: 100
+    },
     totalReturned: leaderboard.length,
     version: payload.data?.Version,
     nextReset: payload.data?.NextReset || "",
     match:
       leaderboard.find((entry) => String(entry.PlayFabId || "").toUpperCase() === targetId) || null,
-    sample: leaderboard.slice(0, 5).map((entry) => ({
-      playfabId: entry.PlayFabId,
-      displayName: entry.DisplayName || entry.Profile?.DisplayName || "",
-      position: entry.Position,
-      value: entry.StatValue
-    }))
+    sample: leaderboard.slice(0, 10).map(summarizeLeaderboardEntry)
   };
 }
 
@@ -1378,17 +1395,18 @@ async function fetchPlayfabLeaderboardAroundPlayer(statisticName, playfabId) {
   const leaderboard = Array.isArray(payload.data?.Leaderboard) ? payload.data.Leaderboard : [];
   const targetId = playfabId.toUpperCase();
   return {
+    request: {
+      endpoint: "Client/GetLeaderboardAroundPlayer",
+      statisticName,
+      playfabId,
+      maxResultsCount: 15
+    },
     totalReturned: leaderboard.length,
     version: payload.data?.Version,
     nextReset: payload.data?.NextReset || "",
     match:
       leaderboard.find((entry) => String(entry.PlayFabId || "").toUpperCase() === targetId) || null,
-    sample: leaderboard.map((entry) => ({
-      playfabId: entry.PlayFabId,
-      displayName: entry.DisplayName || entry.Profile?.DisplayName || "",
-      position: entry.Position,
-      value: entry.StatValue
-    }))
+    sample: leaderboard.map(summarizeLeaderboardEntry)
   };
 }
 

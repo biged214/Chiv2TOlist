@@ -425,6 +425,31 @@ textarea {
   font-weight: 700;
 }
 
+.playfab-debug {
+  margin-top: 6px;
+}
+
+.playfab-debug summary {
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.playfab-debug pre {
+  max-height: 320px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(10, 14, 18, 0.82);
+  color: #d9e2e6;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
 .playfab-form-tools {
   padding-top: 0;
 }
