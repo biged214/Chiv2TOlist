@@ -930,7 +930,9 @@ function displayNameFromPlayfabProfile(profile = {}, playfabId = "") {
   const name = displayName.slice(0, separator).trim();
   const suffix = displayName.slice(separator + 1).trim();
   const playfab = String(playfabId || profile.playfabId || profile.PlayerId || "").trim().toUpperCase();
-  const looksLikePlayfabSuffix = /^[a-fA-F0-9]{8,64}$/.test(suffix) && (!playfab || playfab.startsWith(suffix.toUpperCase()));
+  const looksLikePlayfabSuffix =
+    /^[a-fA-F0-9]{5,64}$/.test(suffix) &&
+    (!playfab || playfab.startsWith(suffix.toUpperCase()) || playfab.endsWith(suffix.toUpperCase()) || suffix.length < 8);
 
   return cleanText(looksLikePlayfabSuffix && name ? name : displayName, 40);
 }
