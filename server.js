@@ -20,7 +20,9 @@ process.on("uncaughtException", (error) => {
   console.error("Uncaught exception:", error);
 });
 
+const adminUsername = process.env.ADMIN_USERNAME || "admin";
 const adminPassword = process.env.ADMIN_PASSWORD;
+const adminTotpSecret = process.env.ADMIN_TOTP_SECRET || process.env.ADMIN_MFA_SECRET || "";
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 const cookieName = "chiv2_admin";
 const defaultListType = "team_objective";
@@ -182,6 +184,62 @@ function parseCookies(header = "") {
 
 function sign(value) {
   return crypto.createHmac("sha256", sessionSecret).update(value).digest("base64url");
+}
+
+function timingSafeEqualText(left = "", right = "") {
+  const leftBuffer = Buffer.from(String(left));
+  const rightBuffer = Buffer.from(String(right));
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function decodeBase32(value = "") {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const clean = String(value).toUpperCase().replace(/[^A-Z2-7]/g, "");
+  const bytes = [];
+  let bits = 0;
+  let valueBuffer = 0;
+
+  for (const character of clean) {
+    const index = alphabet.indexOf(character);
+    if (index === -1) continue;
+    valueBuffer = (valueBuffer << 5) | index;
+    bits += 5;
+    if (bits >= 8) {
+      bytes.push((valueBuffer >>> (bits - 8)) & 255);
+      bits -= 8;
+    }
+  }
+
+  return Buffer.from(bytes);
+}
+
+function totpCode(secret, counter) {
+  const key = decodeBase32(secret);
+  if (!key.length) return "";
+
+  const buffer = Buffer.alloc(8);
+  buffer.writeBigUInt64BE(BigInt(counter));
+  const digest = crypto.createHmac("sha1", key).update(buffer).digest();
+  const offset = digest[digest.length - 1] & 15;
+  const binary =
+    ((digest[offset] & 127) << 24) |
+    ((digest[offset + 1] & 255) << 16) |
+    ((digest[offset + 2] & 255) << 8) |
+    (digest[offset + 3] & 255);
+
+  return String(binary % 1000000).padStart(6, "0");
+}
+
+function verifyTotp(code, secret) {
+  const cleanCode = String(code || "").replace(/\D/g, "");
+  if (!secret || cleanCode.length !== 6) return false;
+
+  const counter = Math.floor(Date.now() / 30000);
+  for (const offset of [-1, 0, 1]) {
+    if (timingSafeEqualText(cleanCode, totpCode(secret, counter + offset))) return true;
+  }
+  return false;
 }
 
 function makeSession() {
@@ -1732,8 +1790,16 @@ app.post("/api/login", (request, response) => {
     return;
   }
 
-  if (request.body?.password !== adminPassword) {
-    response.status(401).json({ error: "Wrong admin code." });
+  if (
+    !timingSafeEqualText(request.body?.username || "", adminUsername) ||
+    !timingSafeEqualText(request.body?.password || "", adminPassword)
+  ) {
+    response.status(401).json({ error: "Wrong admin username or password." });
+    return;
+  }
+
+  if (adminTotpSecret && !verifyTotp(request.body?.mfaCode, adminTotpSecret)) {
+    response.status(401).json({ error: "Wrong MFA code." });
     return;
   }
 

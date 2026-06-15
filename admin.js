@@ -592,7 +592,11 @@ document.querySelector("#unlockAdmin").addEventListener("click", async () => {
   try {
     await api("/api/login", {
       method: "POST",
-      body: JSON.stringify({ password: document.querySelector("#adminCode").value })
+      body: JSON.stringify({
+        username: document.querySelector("#adminUsername").value,
+        password: document.querySelector("#adminCode").value,
+        mfaCode: document.querySelector("#adminMfaCode").value
+      })
     });
     isAdmin = true;
     adminLock.hidden = true;

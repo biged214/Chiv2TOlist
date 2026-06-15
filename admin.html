@@ -39,11 +39,19 @@
 
         <div class="admin-lock" id="adminLock">
           <label>
+            <span>Admin username</span>
+            <input id="adminUsername" autocomplete="username" placeholder="Enter admin username">
+          </label>
+          <label>
             <span>Admin password</span>
-            <input id="adminCode" type="password" placeholder="Enter admin password">
+            <input id="adminCode" type="password" autocomplete="current-password" placeholder="Enter admin password">
+          </label>
+          <label>
+            <span>MFA code</span>
+            <input id="adminMfaCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="Optional 6-digit code">
           </label>
           <button class="button" id="unlockAdmin" type="button">Unlock</button>
-          <p class="hint">Use the admin password configured on the server.</p>
+          <p class="hint">Use the admin credentials configured on the server.</p>
         </div>
 
         <div class="admin-workspace" id="adminWorkspace" hidden>
@@ -124,6 +132,6 @@
       </section>
     </main>
 
-    <script src="admin.js?v=playfab-name-sync-20260613"></script>
+    <script src="admin.js?v=admin-username-mfa-20260615"></script>
   </body>
 </html>
