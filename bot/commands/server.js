@@ -5,7 +5,19 @@ export const serverCommand = new SlashCommandBuilder()
   .setName("server")
   .setDescription("Control the linked Chivalry 2 Nitrado server.")
   .addSubcommand((subcommand) => subcommand.setName("status").setDescription("Show server status."))
-  .addSubcommand((subcommand) => subcommand.setName("settings").setDescription("Show editable Nitrado setting keys."))
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("settings")
+      .setDescription("Show editable Nitrado setting keys.")
+      .addIntegerOption((option) =>
+        option
+          .setName("page")
+          .setDescription("Settings page to show.")
+          .setMinValue(1)
+          .setMaxValue(10)
+          .setRequired(false)
+      )
+  )
   .addSubcommand((subcommand) => subcommand.setName("restart").setDescription("Restart the server."))
   .addSubcommand((subcommand) => subcommand.setName("stop").setDescription("Stop the server."))
   .addSubcommand((subcommand) =>
@@ -115,7 +127,7 @@ async function runServerSubcommand(subcommand, interaction, nitradoClient) {
 
   if (subcommand === "settings") {
     const settings = await nitradoClient.getGameserverSettings();
-    return formatSettings(settings);
+    return formatSettings(settings, interaction.options.getInteger("page") || 1);
   }
 
   if (subcommand === "restart") return nitradoClient.restartGameserver();
@@ -162,21 +174,23 @@ function formatStatus(server) {
   return lines.join("\n");
 }
 
-function formatSettings(settings) {
+function formatSettings(settings, page) {
   if (!settings.length) {
     return "Nitrado did not return editable setting keys for this server.";
   }
 
-  const selected = settings.slice(0, 35);
+  const pageSize = 25;
+  const pageCount = Math.max(1, Math.ceil(settings.length / pageSize));
+  const currentPage = Math.min(Math.max(1, page), pageCount);
+  const start = (currentPage - 1) * pageSize;
+  const selected = settings.slice(start, start + pageSize);
   const lines = selected.map((setting) => {
     const value = maskSettingValue(setting.key, setting.value);
     const label = setting.label ? ` (${setting.label})` : "";
     return `${setting.key}${label}: ${value}`;
   });
 
-  if (settings.length > selected.length) {
-    lines.push(`Showing ${selected.length} of ${settings.length} setting entries.`);
-  }
+  lines.push(`Showing page ${currentPage}/${pageCount}, entries ${start + 1}-${start + selected.length} of ${settings.length}.`);
 
   return lines.join("\n").slice(0, 1900);
 }

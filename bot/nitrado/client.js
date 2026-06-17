@@ -152,13 +152,13 @@ export class NitradoClient {
     const errors = [];
     const discoveredSettings = await this.safeGetSettings();
     const discoveredKeys = settingCandidates(discoveredSettings, keys);
-    const keysToTry = [...new Set([...discoveredKeys, ...keys])];
+    const keysToTry = [...uniqueSettingTargets(discoveredKeys, keys)];
 
-    for (const key of keysToTry) {
+    for (const target of keysToTry) {
       try {
-        return await this.updateGameserverSetting(key, value, actionLabel);
+        return await this.updateGameserverSetting(target, value, actionLabel);
       } catch (error) {
-        errors.push(`${key}: ${error.message || "Unknown error"}`);
+        errors.push(`${target.key}: ${error.message || "Unknown error"}`);
         if (!isRetryableSettingError(error)) throw error;
       }
     }
@@ -174,12 +174,17 @@ export class NitradoClient {
     }
   }
 
-  async updateGameserverSetting(key, value, actionLabel) {
+  async updateGameserverSetting(target, value, actionLabel) {
+    const key = typeof target === "string" ? target : target.key;
+    const categories = [
+      typeof target === "object" ? categoryFromPath(target.path) : "",
+      "config",
+      "settings",
+      "general",
+      ""
+    ].filter((category, index, values) => values.indexOf(category) === index);
+
     const payloads = [
-      { category: "config", key, value, option: key },
-      { category: "config", key, value },
-      { category: "settings", key, value, option: key },
-      { category: "settings", key, value },
       { option: key, value },
       { key, value },
       { [key]: value }
@@ -189,21 +194,48 @@ export class NitradoClient {
     const errors = [];
 
     for (const method of methods) {
-      for (const body of payloads) {
-        try {
-          const data = await this.request(`/services/${this.serviceId}/gameservers/settings`, {
-            method,
-            body: JSON.stringify(body)
-          });
+      for (const category of categories) {
+        const categorizedPayloads = category
+          ? [
+              { category, key, value, option: key },
+              { category, key, value },
+              ...payloads
+            ]
+          : payloads;
 
-          return {
-            action: actionLabel,
-            ok: true,
-            message: data?.message || `Nitrado accepted ${actionLabel}. Restart the server if the change does not apply immediately.`
-          };
-        } catch (error) {
-          errors.push(`${method} ${JSON.stringify(body)} -> ${error.message || "Unknown error"}`);
-          if (!isRetryableSettingError(error)) throw error;
+        for (const body of categorizedPayloads) {
+          try {
+            const data = await this.request(`/services/${this.serviceId}/gameservers/settings`, {
+              method,
+              body: JSON.stringify(body)
+            });
+
+            return {
+              action: actionLabel,
+              ok: true,
+              message: data?.message || `Nitrado accepted ${actionLabel}. Restart the server if the change does not apply immediately.`
+            };
+          } catch (error) {
+            errors.push(`${method} ${JSON.stringify(body)} -> ${error.message || "Unknown error"}`);
+            if (!isRetryableSettingError(error)) throw error;
+          }
+
+          try {
+            const data = await this.request(`/services/${this.serviceId}/gameservers/settings`, {
+              method,
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: new URLSearchParams(flattenPayload(body)).toString()
+            });
+
+            return {
+              action: actionLabel,
+              ok: true,
+              message: data?.message || `Nitrado accepted ${actionLabel}. Restart the server if the change does not apply immediately.`
+            };
+          } catch (error) {
+            errors.push(`${method} form ${JSON.stringify(body)} -> ${error.message || "Unknown error"}`);
+            if (!isRetryableSettingError(error)) throw error;
+          }
         }
       }
     }
@@ -305,11 +337,44 @@ function settingCandidates(settings, preferredKeys) {
       return needles.some((needle) => haystack.includes(needle) || needle.includes(haystack)) ||
         looseNeedles.some((needle) => haystack.includes(needle));
     })
-    .map((setting) => setting.key);
+    .map((setting) => ({
+      key: setting.key,
+      path: setting.path
+    }));
 }
 
 function normalizeKey(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function uniqueSettingTargets(discoveredTargets, fallbackKeys) {
+  const targets = [];
+  const seen = new Set();
+
+  for (const target of discoveredTargets) {
+    const key = target.key || "";
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    targets.push(target);
+  }
+
+  for (const key of fallbackKeys) {
+    if (seen.has(key)) continue;
+    seen.add(key);
+    targets.push({ key, path: "" });
+  }
+
+  return targets;
+}
+
+function categoryFromPath(path) {
+  return String(path || "").split(".").find(Boolean) || "";
+}
+
+function flattenPayload(payload) {
+  return Object.fromEntries(
+    Object.entries(payload).map(([key, value]) => [key, String(value ?? "")])
+  );
 }
 
 function normalizeService(service) {
