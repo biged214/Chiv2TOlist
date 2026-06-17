@@ -167,10 +167,7 @@ function formatSettings(settings) {
     return "Nitrado did not return editable setting keys for this server.";
   }
 
-  const interesting = settings
-    .filter((setting) => isInterestingSetting(setting))
-    .slice(0, 20);
-  const selected = interesting.length ? interesting : settings.slice(0, 20);
+  const selected = settings.slice(0, 35);
   const lines = selected.map((setting) => {
     const value = maskSettingValue(setting.key, setting.value);
     const label = setting.label ? ` (${setting.label})` : "";
@@ -184,13 +181,8 @@ function formatSettings(settings) {
   return lines.join("\n").slice(0, 1900);
 }
 
-function isInterestingSetting(setting) {
-  const text = `${setting.key} ${setting.label} ${setting.path}`.toLowerCase();
-  return ["name", "host", "password", "player", "slot", "max"].some((word) => text.includes(word));
-}
-
 function maskSettingValue(key, value) {
-  if (String(key || "").toLowerCase().includes("password")) {
+  if (String(key || "").toLowerCase().includes("password") || String(key || "").toLowerCase().includes("token")) {
     return value ? "[set]" : "[empty]";
   }
 
