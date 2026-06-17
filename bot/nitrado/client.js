@@ -21,6 +21,11 @@ export class NitradoClient {
     return normalizeGameserver(data);
   }
 
+  async getGameserverSettings() {
+    const data = await this.request(`/services/${this.serviceId}/gameservers/settings`);
+    return normalizeSettings(data);
+  }
+
   async listServices() {
     const data = await this.request("/services", { requireServiceId: false });
     const services = Array.isArray(data?.services) ? data.services : Array.isArray(data) ? data : [];
@@ -68,19 +73,35 @@ export class NitradoClient {
   }
 
   async renameGameserver(name) {
-    return this.updateFirstSetting(["hostname", "server_name", "name"], name, "rename");
+    return this.updateFirstSetting(
+      ["ServerName", "server_name", "hostname", "name", "serverName", "server-name"],
+      name,
+      "rename"
+    );
   }
 
   async setGameserverPassword(password) {
-    return this.updateFirstSetting(["password", "server_password", "join_password"], password, "set password");
+    return this.updateFirstSetting(
+      ["ServerPassword", "server_password", "password", "join_password", "Password", "server-password"],
+      password,
+      "set password"
+    );
   }
 
   async removeGameserverPassword() {
-    return this.updateFirstSetting(["password", "server_password", "join_password"], "", "remove password");
+    return this.updateFirstSetting(
+      ["ServerPassword", "server_password", "password", "join_password", "Password", "server-password"],
+      "",
+      "remove password"
+    );
   }
 
   async setGameserverMaxPlayers(maxPlayers) {
-    return this.updateFirstSetting(["maxplayers", "max_players", "slots", "player_slots"], String(maxPlayers), "set max players");
+    return this.updateFirstSetting(
+      ["MaxPlayers", "maxplayers", "max_players", "slots", "player_slots", "max-players"],
+      String(maxPlayers),
+      "set max players"
+    );
   }
 
   async gameserverAction(action) {
@@ -129,8 +150,11 @@ export class NitradoClient {
 
   async updateFirstSetting(keys, value, actionLabel) {
     const errors = [];
+    const discoveredSettings = await this.safeGetSettings();
+    const discoveredKeys = settingCandidates(discoveredSettings, keys);
+    const keysToTry = [...new Set([...discoveredKeys, ...keys])];
 
-    for (const key of keys) {
+    for (const key of keysToTry) {
       try {
         return await this.updateGameserverSetting(key, value, actionLabel);
       } catch (error) {
@@ -142,10 +166,21 @@ export class NitradoClient {
     throw new NitradoError(`Nitrado did not accept any ${actionLabel} setting key. Tried: ${errors.join("; ")}`);
   }
 
+  async safeGetSettings() {
+    try {
+      return await this.getGameserverSettings();
+    } catch {
+      return [];
+    }
+  }
+
   async updateGameserverSetting(key, value, actionLabel) {
     const payloads = [
+      { category: "config", key, value, option: key },
       { category: "config", key, value },
+      { category: "settings", key, value, option: key },
       { category: "settings", key, value },
+      { option: key, value },
       { key, value },
       { [key]: value }
     ];
@@ -206,6 +241,75 @@ function normalizeGameserver(data) {
     address: query?.address || server?.ip || service?.details?.address || "",
     raw: server
   };
+}
+
+function normalizeSettings(data) {
+  const root = data?.settings || data?.gameserver?.settings || data;
+  const results = [];
+
+  collectSettings(root, [], results);
+  return results;
+}
+
+function collectSettings(value, pathParts, results) {
+  if (!value || typeof value !== "object") return;
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectSettings(item, pathParts, results);
+    }
+    return;
+  }
+
+  const key = value.key || value.name || value.id || value.option || value.variable;
+  if (key) {
+    results.push({
+      key: String(key),
+      label: String(value.label || value.title || value.description || ""),
+      value: settingValue(value),
+      path: pathParts.join(".")
+    });
+  }
+
+  for (const [entryKey, entryValue] of Object.entries(value)) {
+    if (entryValue && typeof entryValue === "object") {
+      collectSettings(entryValue, [...pathParts, entryKey], results);
+      continue;
+    }
+
+    if (["string", "number", "boolean"].includes(typeof entryValue)) {
+      results.push({
+        key: entryKey,
+        label: "",
+        value: entryValue,
+        path: pathParts.join(".")
+      });
+    }
+  }
+}
+
+function settingValue(value) {
+  if ("value" in value) return value.value;
+  if ("current" in value) return value.current;
+  if ("default" in value) return value.default;
+  return "";
+}
+
+function settingCandidates(settings, preferredKeys) {
+  const needles = preferredKeys.map(normalizeKey);
+  const looseNeedles = ["server", "name", "password", "players", "slots"];
+
+  return settings
+    .filter((setting) => {
+      const haystack = normalizeKey(`${setting.key} ${setting.label} ${setting.path}`);
+      return needles.some((needle) => haystack.includes(needle) || needle.includes(haystack)) ||
+        looseNeedles.some((needle) => haystack.includes(needle));
+    })
+    .map((setting) => setting.key);
+}
+
+function normalizeKey(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 function normalizeService(service) {

@@ -5,6 +5,7 @@ export const serverCommand = new SlashCommandBuilder()
   .setName("server")
   .setDescription("Control the linked Chivalry 2 Nitrado server.")
   .addSubcommand((subcommand) => subcommand.setName("status").setDescription("Show server status."))
+  .addSubcommand((subcommand) => subcommand.setName("settings").setDescription("Show editable Nitrado setting keys."))
   .addSubcommand((subcommand) => subcommand.setName("restart").setDescription("Restart the server."))
   .addSubcommand((subcommand) => subcommand.setName("stop").setDescription("Stop the server."))
   .addSubcommand((subcommand) =>
@@ -112,6 +113,11 @@ async function runServerSubcommand(subcommand, interaction, nitradoClient) {
     return formatStatus(server);
   }
 
+  if (subcommand === "settings") {
+    const settings = await nitradoClient.getGameserverSettings();
+    return formatSettings(settings);
+  }
+
   if (subcommand === "restart") return nitradoClient.restartGameserver();
   if (subcommand === "stop") return nitradoClient.stopGameserver();
 
@@ -154,6 +160,42 @@ function formatStatus(server) {
   if (server.address) lines.push(`Address: ${server.address}`);
 
   return lines.join("\n");
+}
+
+function formatSettings(settings) {
+  if (!settings.length) {
+    return "Nitrado did not return editable setting keys for this server.";
+  }
+
+  const interesting = settings
+    .filter((setting) => isInterestingSetting(setting))
+    .slice(0, 20);
+  const selected = interesting.length ? interesting : settings.slice(0, 20);
+  const lines = selected.map((setting) => {
+    const value = maskSettingValue(setting.key, setting.value);
+    const label = setting.label ? ` (${setting.label})` : "";
+    return `${setting.key}${label}: ${value}`;
+  });
+
+  if (settings.length > selected.length) {
+    lines.push(`Showing ${selected.length} of ${settings.length} setting entries.`);
+  }
+
+  return lines.join("\n").slice(0, 1900);
+}
+
+function isInterestingSetting(setting) {
+  const text = `${setting.key} ${setting.label} ${setting.path}`.toLowerCase();
+  return ["name", "host", "password", "player", "slot", "max"].some((word) => text.includes(word));
+}
+
+function maskSettingValue(key, value) {
+  if (String(key || "").toLowerCase().includes("password")) {
+    return value ? "[set]" : "[empty]";
+  }
+
+  if (value === undefined || value === null || value === "") return "[empty]";
+  return String(value).slice(0, 80);
 }
 
 function formatNitradoError(error) {
