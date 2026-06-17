@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import mysql from "mysql2/promise";
+import { getDiscordBotStatus, startDiscordBot } from "./bot/index.js";
 
 const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
@@ -20,9 +21,7 @@ process.on("uncaughtException", (error) => {
   console.error("Uncaught exception:", error);
 });
 
-const adminUsername = process.env.ADMIN_USERNAME || "admin";
 const adminPassword = process.env.ADMIN_PASSWORD;
-const adminTotpSecret = process.env.ADMIN_TOTP_SECRET || process.env.ADMIN_MFA_SECRET || "";
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 const cookieName = "chiv2_admin";
 const defaultListType = "team_objective";
@@ -72,12 +71,7 @@ const playfabConfig = {
   sessionTicket: envValue("PLAYFAB_SESSION_TICKET", "playfab_session_ticket"),
   cacheMinutes: Number(envValue("PLAYFAB_CACHE_MINUTES", "playfab_cache_minutes") || "360"),
   sessionMinutes: Number(envValue("PLAYFAB_SESSION_MINUTES", "playfab_session_minutes") || "120"),
-  leaderboardStats: envValue("PLAYFAB_LEADERBOARD_STATS", "playfab_leaderboard_stats"),
-  autoNameSync: envValue("PLAYFAB_AUTO_NAME_SYNC", "playfab_auto_name_sync").toLowerCase() !== "false",
-  autoNameSyncHours: Number(envValue("PLAYFAB_AUTO_NAME_SYNC_HOURS", "playfab_auto_name_sync_hours") || "24"),
-  autoNameSyncStartDelaySeconds: Number(
-    envValue("PLAYFAB_AUTO_NAME_SYNC_START_DELAY_SECONDS", "playfab_auto_name_sync_start_delay_seconds") || "60"
-  )
+  leaderboardStats: envValue("PLAYFAB_LEADERBOARD_STATS", "playfab_leaderboard_stats")
 };
 const steamConfig = {
   appId: Number(envValue("CHIVALRY2_STEAM_APP_ID", "chivalry2_steam_app_id", "STEAM_APP_ID", "steam_app_id") || "1824220"),
@@ -97,7 +91,6 @@ const steamConfig = {
 let steamClientPromise;
 let playfabSessionPromise;
 let cachedPlayfabSession;
-let playfabNameSyncRunning = false;
 let playfabWarmupStatus = {
   state: "idle",
   message: "",
@@ -105,7 +98,11 @@ let playfabWarmupStatus = {
   updatedAt: ""
 };
 function hasDatabase() {
-  return Boolean(process.env.DB_HOST && process.env.DB_NAME && process.env.DB_USER);
+  return Boolean(
+    envValue("DB_HOST", "MYSQLHOST") &&
+      envValue("DB_NAME", "MYSQLDATABASE") &&
+      envValue("DB_USER", "MYSQLUSER")
+  );
 }
 
 const tiers = [
@@ -184,62 +181,6 @@ function parseCookies(header = "") {
 
 function sign(value) {
   return crypto.createHmac("sha256", sessionSecret).update(value).digest("base64url");
-}
-
-function timingSafeEqualText(left = "", right = "") {
-  const leftBuffer = Buffer.from(String(left));
-  const rightBuffer = Buffer.from(String(right));
-  if (leftBuffer.length !== rightBuffer.length) return false;
-  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
-}
-
-function decodeBase32(value = "") {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  const clean = String(value).toUpperCase().replace(/[^A-Z2-7]/g, "");
-  const bytes = [];
-  let bits = 0;
-  let valueBuffer = 0;
-
-  for (const character of clean) {
-    const index = alphabet.indexOf(character);
-    if (index === -1) continue;
-    valueBuffer = (valueBuffer << 5) | index;
-    bits += 5;
-    if (bits >= 8) {
-      bytes.push((valueBuffer >>> (bits - 8)) & 255);
-      bits -= 8;
-    }
-  }
-
-  return Buffer.from(bytes);
-}
-
-function totpCode(secret, counter) {
-  const key = decodeBase32(secret);
-  if (!key.length) return "";
-
-  const buffer = Buffer.alloc(8);
-  buffer.writeBigUInt64BE(BigInt(counter));
-  const digest = crypto.createHmac("sha1", key).update(buffer).digest();
-  const offset = digest[digest.length - 1] & 15;
-  const binary =
-    ((digest[offset] & 127) << 24) |
-    ((digest[offset + 1] & 255) << 16) |
-    ((digest[offset + 2] & 255) << 8) |
-    (digest[offset + 3] & 255);
-
-  return String(binary % 1000000).padStart(6, "0");
-}
-
-function verifyTotp(code, secret) {
-  const cleanCode = String(code || "").replace(/\D/g, "");
-  if (!secret || cleanCode.length !== 6) return false;
-
-  const counter = Math.floor(Date.now() / 30000);
-  for (const offset of [-1, 0, 1]) {
-    if (timingSafeEqualText(cleanCode, totpCode(secret, counter + offset))) return true;
-  }
-  return false;
 }
 
 function makeSession() {
@@ -426,11 +367,11 @@ async function writePlayers(players, listType = defaultListType) {
 
 function databaseConfig() {
   return {
-    host: process.env.DB_HOST,
-    port: Number(process.env.DB_PORT || "3306"),
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME
+    host: envValue("DB_HOST", "MYSQLHOST"),
+    port: Number(envValue("DB_PORT", "MYSQLPORT") || "3306"),
+    user: envValue("DB_USER", "MYSQLUSER"),
+    password: envValue("DB_PASSWORD", "MYSQLPASSWORD"),
+    database: envValue("DB_NAME", "MYSQLDATABASE")
   };
 }
 
@@ -738,7 +679,13 @@ async function readPlayersFromDatabase(listType = defaultListType) {
     );
     if (rows.length) return rows.map(rowToPlayer);
 
-    if (normalizedListType !== defaultListType) return [];
+    if (
+      normalizedListType !== defaultListType ||
+      !["1", "true", "yes"].includes(envValue("DB_AUTO_SEED_PLAYERS").toLowerCase())
+    ) {
+      return [];
+    }
+
     const seededPlayers = await readPlayersFromFile(defaultListType);
     await writePlayersToDatabase(seededPlayers, defaultListType);
     return seededPlayers;
@@ -920,23 +867,6 @@ function summarizePlayfabProfile(profile = {}, playfabId) {
   };
 }
 
-function displayNameFromPlayfabProfile(profile = {}, playfabId = "") {
-  const displayName = cleanText(profile.displayName || profile.DisplayName || "", 80);
-  if (!displayName) return "";
-
-  const separator = displayName.lastIndexOf(":");
-  if (separator === -1) return cleanText(displayName, 40);
-
-  const name = displayName.slice(0, separator).trim();
-  const suffix = displayName.slice(separator + 1).trim();
-  const playfab = String(playfabId || profile.playfabId || profile.PlayerId || "").trim().toUpperCase();
-  const looksLikePlayfabSuffix =
-    /^[a-fA-F0-9]{5,64}$/.test(suffix) &&
-    (!playfab || playfab.startsWith(suffix.toUpperCase()) || playfab.endsWith(suffix.toUpperCase()) || suffix.length < 8);
-
-  return cleanText(looksLikePlayfabSuffix && name ? name : displayName, 40);
-}
-
 async function readPlayfabCache(playfabId) {
   if (hasDatabase()) {
     return withDatabase(async (connection) => {
@@ -1051,22 +981,6 @@ function leaderboardStatNames() {
     .map((name) => cleanText(name, 80))
     .filter(Boolean);
   return [...new Set(configured.length ? configured : defaultLeaderboardStats)];
-}
-
-function summarizeLeaderboardEntry(entry) {
-  return {
-    playfabId: entry.PlayFabId,
-    displayName: entry.DisplayName || entry.Profile?.DisplayName || "",
-    position: entry.Position,
-    value: entry.StatValue,
-    profile: entry.Profile
-      ? {
-          displayName: entry.Profile.DisplayName || "",
-          avatarUrl: entry.Profile.AvatarUrl || "",
-          lastLogin: entry.Profile.LastLogin || ""
-        }
-      : null
-  };
 }
 
 function fetchTimeoutSignal(milliseconds = 20000) {
@@ -1390,113 +1304,6 @@ async function fetchPlayfabProfile(playfabId) {
   return summarizePlayfabProfile(payload.data?.PlayerProfile, playfabId);
 }
 
-function sleep(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-function playfabNameSyncIntervalMs() {
-  return Math.max(1, Number.isFinite(playfabConfig.autoNameSyncHours) ? playfabConfig.autoNameSyncHours : 24) * 60 * 60 * 1000;
-}
-
-function playfabNameSyncStartDelayMs() {
-  return (
-    Math.max(
-      5,
-      Number.isFinite(playfabConfig.autoNameSyncStartDelaySeconds) ? playfabConfig.autoNameSyncStartDelaySeconds : 60
-    ) * 1000
-  );
-}
-
-async function syncPlayfabNames() {
-  if (playfabNameSyncRunning) {
-    console.log("PlayFab name sync skipped because another sync is still running.");
-    return { skipped: true, reason: "already-running" };
-  }
-
-  if (!playfabConfig.autoNameSync) {
-    console.log("PlayFab name sync is disabled.");
-    return { skipped: true, reason: "disabled" };
-  }
-
-  if (!playfabConfig.titleId || (!playfabConfig.sessionTicket && !hasSteamPlayfabConfig())) {
-    console.log("PlayFab name sync skipped because PlayFab lookup is not configured.");
-    return { skipped: true, reason: "not-configured" };
-  }
-
-  playfabNameSyncRunning = true;
-  const summary = {
-    checked: 0,
-    updated: 0,
-    skipped: 0,
-    failed: 0
-  };
-
-  console.log("Starting PlayFab name sync.");
-  try {
-    for (const listType of listTypes) {
-      const players = await readPlayers(listType.id);
-      let changed = false;
-      const nextPlayers = [];
-
-      for (const player of players) {
-        const playfabId = cleanPlayfabId(player.playfabId);
-        if (!playfabId) {
-          summary.skipped += 1;
-          nextPlayers.push(player);
-          continue;
-        }
-
-        summary.checked += 1;
-        try {
-          const profile = await fetchPlayfabProfile(playfabId);
-          await writePlayfabCache(playfabId, profile);
-          const playfabName = displayNameFromPlayfabProfile(profile, playfabId);
-          if (playfabName && playfabName !== player.name) {
-            nextPlayers.push(normalizePlayer({ ...player, name: playfabName }));
-            changed = true;
-            summary.updated += 1;
-            console.log(`Updated ${player.name} to PlayFab name ${playfabName}.`);
-          } else {
-            nextPlayers.push(player);
-          }
-        } catch (error) {
-          summary.failed += 1;
-          nextPlayers.push(player);
-          console.error(`PlayFab name sync failed for ${player.name || player.id}:`, error.message);
-        }
-
-        await sleep(750);
-      }
-
-      if (changed) {
-        await writePlayers(nextPlayers, listType.id);
-      }
-    }
-  } finally {
-    playfabNameSyncRunning = false;
-    console.log(
-      `PlayFab name sync finished. checked=${summary.checked} updated=${summary.updated} skipped=${summary.skipped} failed=${summary.failed}`
-    );
-  }
-
-  return summary;
-}
-
-function startPlayfabNameSyncSchedule() {
-  if (!playfabConfig.autoNameSync) return;
-
-  const interval = playfabNameSyncIntervalMs();
-  const run = () => {
-    syncPlayfabNames().catch((error) => {
-      console.error("PlayFab name sync failed:", error);
-    });
-  };
-
-  setTimeout(run, playfabNameSyncStartDelayMs());
-  setInterval(run, interval);
-  console.log(`PlayFab name sync scheduled every ${Math.round(interval / 60 / 60 / 1000)} hour(s).`);
-}
-
 async function fetchPlayfabLeaderboard(statisticName, playfabId) {
   const sessionTicket = await getPlayfabSessionTicket();
   let response;
@@ -1533,68 +1340,17 @@ async function fetchPlayfabLeaderboard(statisticName, playfabId) {
   const targetId = playfabId.toUpperCase();
   return {
     statisticName,
-    request: {
-      endpoint: "Client/GetLeaderboard",
-      statisticName,
-      startPosition: 0,
-      maxResultsCount: 100
-    },
     totalReturned: leaderboard.length,
     version: payload.data?.Version,
     nextReset: payload.data?.NextReset || "",
     match:
       leaderboard.find((entry) => String(entry.PlayFabId || "").toUpperCase() === targetId) || null,
-    sample: leaderboard.slice(0, 10).map(summarizeLeaderboardEntry)
-  };
-}
-
-async function fetchPlayfabLeaderboardAroundPlayer(statisticName, playfabId) {
-  const sessionTicket = await getPlayfabSessionTicket();
-  let response;
-  try {
-    response = await fetch(`https://${playfabConfig.titleId}.playfabapi.com/Client/GetLeaderboardAroundPlayer`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Authorization": sessionTicket
-      },
-      signal: fetchTimeoutSignal(),
-      body: JSON.stringify({
-        StatisticName: statisticName,
-        PlayFabId: playfabId,
-        MaxResultsCount: 15,
-        ProfileConstraints: {
-          ShowDisplayName: true,
-          ShowLastLogin: true,
-          ShowAvatarUrl: true
-        }
-      })
-    });
-  } catch (error) {
-    throw playfabServiceError(`Leaderboard around-player request failed: ${error.message}`, 502, "playfab-leaderboard-around-player");
-  }
-
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload.error) {
-    const message = sanitizeExternalError(payload.errorMessage || payload.error || `PlayFab returned ${response.status}`);
-    throw playfabServiceError(message, response.status || 502, "playfab-leaderboard-around-player");
-  }
-
-  const leaderboard = Array.isArray(payload.data?.Leaderboard) ? payload.data.Leaderboard : [];
-  const targetId = playfabId.toUpperCase();
-  return {
-    request: {
-      endpoint: "Client/GetLeaderboardAroundPlayer",
-      statisticName,
-      playfabId,
-      maxResultsCount: 15
-    },
-    totalReturned: leaderboard.length,
-    version: payload.data?.Version,
-    nextReset: payload.data?.NextReset || "",
-    match:
-      leaderboard.find((entry) => String(entry.PlayFabId || "").toUpperCase() === targetId) || null,
-    sample: leaderboard.map(summarizeLeaderboardEntry)
+    sample: leaderboard.slice(0, 5).map((entry) => ({
+      playfabId: entry.PlayFabId,
+      displayName: entry.DisplayName || entry.Profile?.DisplayName || "",
+      position: entry.Position,
+      value: entry.StatValue
+    }))
   };
 }
 
@@ -1604,15 +1360,6 @@ app.get("/api/config", (_request, response) => {
 
 app.get("/api/playfab-status", requireAdmin, (_request, response) => {
   response.json(playfabConfigStatus());
-});
-
-app.post("/api/playfab-name-sync", requireAdmin, async (_request, response, next) => {
-  try {
-    const result = await syncPlayfabNames();
-    response.json({ ok: true, result });
-  } catch (error) {
-    next(error);
-  }
 });
 
 app.get("/api/playfab-leaderboards/:playfabId", requireAdmin, async (request, response, next) => {
@@ -1642,15 +1389,7 @@ app.get("/api/playfab-leaderboards/:playfabId", requireAdmin, async (request, re
     const results = [];
     for (const statisticName of statNames) {
       try {
-        const result = await fetchPlayfabLeaderboard(statisticName, playfabId);
-        if (result.totalReturned) {
-          try {
-            result.aroundPlayer = await fetchPlayfabLeaderboardAroundPlayer(statisticName, playfabId);
-          } catch (error) {
-            result.aroundPlayerError = error.message;
-          }
-        }
-        results.push(result);
+        results.push(await fetchPlayfabLeaderboard(statisticName, playfabId));
       } catch (error) {
         results.push({
           statisticName,
@@ -1664,7 +1403,7 @@ app.get("/api/playfab-leaderboards/:playfabId", requireAdmin, async (request, re
       playfabId,
       checkedAt: new Date().toISOString(),
       statNames,
-      matches: results.filter((result) => result.match || result.aroundPlayer?.match),
+      matches: results.filter((result) => result.match),
       results
     });
   } catch (error) {
@@ -1792,16 +1531,8 @@ app.post("/api/login", (request, response) => {
     return;
   }
 
-  if (
-    !timingSafeEqualText(request.body?.username || "", adminUsername) ||
-    !timingSafeEqualText(request.body?.password || "", adminPassword)
-  ) {
-    response.status(401).json({ error: "Wrong admin username or password." });
-    return;
-  }
-
-  if (adminTotpSecret && !verifyTotp(request.body?.mfaCode, adminTotpSecret)) {
-    response.status(401).json({ error: "Wrong MFA code." });
+  if (request.body?.password !== adminPassword) {
+    response.status(401).json({ error: "Wrong admin code." });
     return;
   }
 
@@ -2110,6 +1841,10 @@ app.post("/api/players/reset", requireAdmin, async (_request, response, next) =>
   }
 });
 
+app.get("/api/bot/status", (_request, response) => {
+  response.json(getDiscordBotStatus());
+});
+
 app.get("/admin", (_request, response) => {
   response.sendFile(path.join(__dirname, "admin.html"));
 });
@@ -2139,5 +1874,7 @@ app.use((error, request, response, _next) => {
 
 app.listen(port, () => {
   console.log(`Chiv2 tier list server running on port ${port}`);
-  startPlayfabNameSyncSchedule();
+  startDiscordBot().catch((error) => {
+    console.error("Discord bot failed to start:", error);
+  });
 });

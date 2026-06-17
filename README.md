@@ -28,3 +28,7 @@ For now, changes are saved in your browser using local storage. That is perfect 
 ## Going live
 
 See `DEPLOYMENT.md` for the beginner-friendly upload steps.
+
+## Discord Nitrado bot
+
+The Discord bot now runs from the same Node app when its secrets are set. See `BOT_SETUP.md` for the required Discord and Nitrado environment variables.

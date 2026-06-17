@@ -5,9 +5,13 @@
   "type": "module",
   "scripts": {
     "build": "node -e \"console.log('No build step needed for static site')\"",
+    "bot:register": "node bot/register.js",
+    "db:migrate": "node db-migrate.js",
+    "nitrado:services": "node bot/nitrado/listServices.js",
     "start": "node server.js"
   },
   "dependencies": {
+    "discord.js": "^14.15.3",
     "express": "^4.19.2",
     "mysql2": "^3.22.5",
     "steam-totp": "2.1.2",
