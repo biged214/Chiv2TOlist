@@ -28,7 +28,35 @@ export class NitradoClient {
   }
 
   async startGameserver() {
-    return this.gameserverAction("start");
+    try {
+      return await this.gameserverAction("start");
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+    }
+
+    try {
+      const data = await this.request(`/services/${this.serviceId}/start`, {
+        method: "POST"
+      });
+
+      return {
+        action: "start",
+        ok: true,
+        message: data?.message || "Nitrado accepted the service start request."
+      };
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+    }
+
+    const data = await this.request(`/services/${this.serviceId}/gameservers/restart`, {
+      method: "POST"
+    });
+
+    return {
+      action: "start",
+      ok: true,
+      message: data?.message || "Nitrado accepted a restart request to bring the stopped server online."
+    };
   }
 
   async stopGameserver() {
@@ -37,6 +65,22 @@ export class NitradoClient {
 
   async restartGameserver() {
     return this.gameserverAction("restart");
+  }
+
+  async renameGameserver(name) {
+    return this.updateFirstSetting(["hostname", "server_name", "name"], name, "rename");
+  }
+
+  async setGameserverPassword(password) {
+    return this.updateFirstSetting(["password", "server_password", "join_password"], password, "set password");
+  }
+
+  async removeGameserverPassword() {
+    return this.updateFirstSetting(["password", "server_password", "join_password"], "", "remove password");
+  }
+
+  async setGameserverMaxPlayers(maxPlayers) {
+    return this.updateFirstSetting(["maxplayers", "max_players", "slots", "player_slots"], String(maxPlayers), "set max players");
   }
 
   async gameserverAction(action) {
@@ -81,6 +125,55 @@ export class NitradoClient {
     }
 
     return data?.data ?? data;
+  }
+
+  async updateFirstSetting(keys, value, actionLabel) {
+    const errors = [];
+
+    for (const key of keys) {
+      try {
+        return await this.updateGameserverSetting(key, value, actionLabel);
+      } catch (error) {
+        errors.push(`${key}: ${error.message || "Unknown error"}`);
+        if (!isRetryableSettingError(error)) throw error;
+      }
+    }
+
+    throw new NitradoError(`Nitrado did not accept any ${actionLabel} setting key. Tried: ${errors.join("; ")}`);
+  }
+
+  async updateGameserverSetting(key, value, actionLabel) {
+    const payloads = [
+      { category: "config", key, value },
+      { category: "settings", key, value },
+      { key, value },
+      { [key]: value }
+    ];
+
+    const methods = ["POST", "PUT", "PATCH"];
+    const errors = [];
+
+    for (const method of methods) {
+      for (const body of payloads) {
+        try {
+          const data = await this.request(`/services/${this.serviceId}/gameservers/settings`, {
+            method,
+            body: JSON.stringify(body)
+          });
+
+          return {
+            action: actionLabel,
+            ok: true,
+            message: data?.message || `Nitrado accepted ${actionLabel}. Restart the server if the change does not apply immediately.`
+          };
+        } catch (error) {
+          errors.push(`${method} ${JSON.stringify(body)} -> ${error.message || "Unknown error"}`);
+          if (!isRetryableSettingError(error)) throw error;
+        }
+      }
+    }
+
+    throw new NitradoError(`Nitrado rejected ${actionLabel}. Tried setting key "${key}". Last errors: ${errors.slice(-3).join("; ")}`);
   }
 }
 
@@ -131,4 +224,21 @@ function firstNumber(...values) {
     if (Number.isFinite(number)) return number;
   }
   return undefined;
+}
+
+function isNotFound(error) {
+  return error?.statusCode === 404 || String(error?.message || "").toLowerCase() === "not found";
+}
+
+function isRetryableSettingError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    error?.statusCode === 400 ||
+    error?.statusCode === 404 ||
+    error?.statusCode === 405 ||
+    error?.statusCode === 422 ||
+    message.includes("not found") ||
+    message.includes("invalid") ||
+    message.includes("unknown")
+  );
 }

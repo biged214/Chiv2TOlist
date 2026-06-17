@@ -37,13 +37,16 @@ The bot registers one slash command:
 /nitrado link
 /nitrado info
 /nitrado unlink
-/server action:status
-/server action:start
-/server action:stop
-/server action:restart
+/server status
+/server restart
+/server stop
+/server rename name:New Name
+/server password mode:Set value:password
+/server password mode:Remove
+/server maxplayers count:8
 ```
 
-Server admins should run `/nitrado link` first. It opens a private Discord form for the Nitrado API token and service ID. Then use `/server action:status` to confirm the link.
+Server admins should run `/nitrado link` first. It opens a private Discord form for the Nitrado API token and service ID. Then use `/server status` to confirm the link.
 
 `/nitrado link` requires `BOT_ENCRYPTION_KEY` or `SESSION_SECRET` to be set before it will save tokens.
 
@@ -76,15 +79,15 @@ If `/server` or `/nitrado` does not appear in Discord's slash-command picker:
 
 If commands appear but never reply, the commands registered but the bot process is probably offline or crashed. Check hosting logs for `Discord bot failed to start` or `Discord client error`.
 
-If `/server action:status` replies with `Permission scope service missing for this action`, the Discord bot is working and Nitrado rejected the token permissions. Create or update the Nitrado API token with service/gameserver access, save it as `NITRADO_TOKEN`, and restart the app.
+If `/server status` replies with `Permission scope service missing for this action`, the Discord bot is working and Nitrado rejected the token permissions. Create or update the Nitrado API token with service/gameserver access, then run `/nitrado link` again.
 
-If `/server action:status` replies with `The selected service has not been found`, the token works but `NITRADO_SERVICE_ID` is wrong or belongs to a different Nitrado account. Run this locally with the same `NITRADO_TOKEN`:
+If `/server status` replies with `The selected service has not been found`, the token works but the service ID is wrong or belongs to a different Nitrado account. Run this locally with the same Nitrado token:
 
 ```powershell
 npm run nitrado:services
 ```
 
-Copy the matching `id=` value into `NITRADO_SERVICE_ID`, restart the app, and try `/server action:status` again.
+Copy the matching `id=` value, run `/nitrado link` again, and try `/server status` again.
 
 ## Local Run
 

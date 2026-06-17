@@ -1,25 +1,57 @@
-import {
-  PermissionFlagsBits,
-  SlashCommandBuilder
-} from "discord.js";
+import { PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
 import { NitradoClient } from "../nitrado/client.js";
-
-const commandChoices = [
-  { name: "Status", value: "status" },
-  { name: "Start", value: "start" },
-  { name: "Stop", value: "stop" },
-  { name: "Restart", value: "restart" }
-];
 
 export const serverCommand = new SlashCommandBuilder()
   .setName("server")
   .setDescription("Control the linked Chivalry 2 Nitrado server.")
-  .addStringOption((option) =>
-    option
-      .setName("action")
-      .setDescription("The server action to run.")
-      .setRequired(true)
-      .addChoices(...commandChoices)
+  .addSubcommand((subcommand) => subcommand.setName("status").setDescription("Show server status."))
+  .addSubcommand((subcommand) => subcommand.setName("restart").setDescription("Restart the server."))
+  .addSubcommand((subcommand) => subcommand.setName("stop").setDescription("Stop the server."))
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("rename")
+      .setDescription("Rename the server.")
+      .addStringOption((option) =>
+        option
+          .setName("name")
+          .setDescription("New server name.")
+          .setMinLength(3)
+          .setMaxLength(80)
+          .setRequired(true)
+      )
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("password")
+      .setDescription("Set or remove the server password.")
+      .addStringOption((option) =>
+        option
+          .setName("mode")
+          .setDescription("Whether to set or remove the password.")
+          .setRequired(true)
+          .addChoices({ name: "Set", value: "set" }, { name: "Remove", value: "remove" })
+      )
+      .addStringOption((option) =>
+        option
+          .setName("value")
+          .setDescription("Password to set. Leave empty when removing.")
+          .setMinLength(1)
+          .setMaxLength(64)
+          .setRequired(false)
+      )
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("maxplayers")
+      .setDescription("Change the max player count.")
+      .addIntegerOption((option) =>
+        option
+          .setName("count")
+          .setDescription("Allowed player count.")
+          .setMinValue(2)
+          .setMaxValue(64)
+          .setRequired(true)
+      )
   )
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
@@ -32,7 +64,7 @@ export async function handleServerCommand(interaction, { getNitradoCredentials, 
     return;
   }
 
-  const action = interaction.options.getString("action", true);
+  const subcommand = interaction.options.getSubcommand();
   await interaction.deferReply({ ephemeral: true });
 
   try {
@@ -43,17 +75,16 @@ export async function handleServerCommand(interaction, { getNitradoCredentials, 
     }
 
     const nitradoClient = new NitradoClient(credentials);
+    const result = await runServerSubcommand(subcommand, interaction, nitradoClient);
 
-    if (action === "status") {
-      const server = await nitradoClient.getGameserver();
-      await interaction.editReply(formatStatus(server));
+    if (typeof result === "string") {
+      await interaction.editReply(result);
       return;
     }
 
-    const result = await runServerAction(action, nitradoClient);
     await interaction.editReply(`Done: ${result.message}`);
   } catch (error) {
-    console.error(`Discord /server ${action} failed:`, error);
+    console.error(`Discord /server ${subcommand} failed:`, error);
     await interaction.editReply(formatNitradoError(error));
   }
 }
@@ -75,21 +106,36 @@ function canControlServer(interaction, allowedRoleIds) {
   return allowedRoleIds.some((roleId) => memberRoles?.cache?.has(roleId));
 }
 
-async function runServerAction(action, nitradoClient) {
-  if (action === "start") {
+async function runServerSubcommand(subcommand, interaction, nitradoClient) {
+  if (subcommand === "status") {
     const server = await nitradoClient.getGameserver();
-    if (isStarted(server.status)) {
-      return {
-        action,
-        ok: true,
-        message: `Server is already ${server.status}.`
-      };
-    }
-    return nitradoClient.startGameserver();
+    return formatStatus(server);
   }
-  if (action === "stop") return nitradoClient.stopGameserver();
-  if (action === "restart") return nitradoClient.restartGameserver();
-  throw new Error(`Unknown server action: ${action}`);
+
+  if (subcommand === "restart") return nitradoClient.restartGameserver();
+  if (subcommand === "stop") return nitradoClient.stopGameserver();
+
+  if (subcommand === "rename") {
+    return nitradoClient.renameGameserver(interaction.options.getString("name", true));
+  }
+
+  if (subcommand === "password") {
+    const mode = interaction.options.getString("mode", true);
+    if (mode === "remove") return nitradoClient.removeGameserverPassword();
+
+    const password = interaction.options.getString("value");
+    if (!password) {
+      return "Choose `mode:set` and provide `value` to set a password.";
+    }
+
+    return nitradoClient.setGameserverPassword(password);
+  }
+
+  if (subcommand === "maxplayers") {
+    return nitradoClient.setGameserverMaxPlayers(interaction.options.getInteger("count", true));
+  }
+
+  throw new Error(`Unknown server subcommand: ${subcommand}`);
 }
 
 function formatStatus(server) {
@@ -110,32 +156,25 @@ function formatStatus(server) {
   return lines.join("\n");
 }
 
-function isStarted(status) {
-  return ["started", "running", "online"].includes(String(status || "").toLowerCase());
-}
-
 function formatNitradoError(error) {
   const message = error.message || "Unknown error.";
 
   if (message.toLowerCase().includes("permission scope service missing")) {
     return [
       "Nitrado request failed: the API token is missing the service permission scope.",
-      "Create or update the Nitrado API token with service/gameserver access, then update NITRADO_TOKEN and restart the app."
+      "Create or update the Nitrado API token with service/gameserver access, then update the linked server token with `/nitrado link`."
     ].join("\n");
   }
 
   if (message.toLowerCase().includes("selected service has not been found")) {
     return [
-      "Nitrado request failed: the configured NITRADO_SERVICE_ID was not found for this token.",
-      "Run `npm run nitrado:services` locally with the same NITRADO_TOKEN, copy the correct service id, then restart the app."
+      "Nitrado request failed: the configured Nitrado service ID was not found for this token.",
+      "Run `/nitrado link` again with the correct token and service ID."
     ].join("\n");
   }
 
   if (message.toLowerCase() === "not found") {
-    return [
-      "Nitrado request failed: Not Found.",
-      "If this was `start`, the server may already be started or Nitrado may not expose a start action for this service state."
-    ].join("\n");
+    return "Nitrado request failed: Not Found. This action may not be available for this Chivalry 2 service state.";
   }
 
   return `Nitrado request failed: ${message}`;
