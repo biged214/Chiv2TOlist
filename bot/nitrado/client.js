@@ -84,7 +84,8 @@ export class NitradoClient {
     return this.updateFirstSetting(
       ["ServerPassword", "server_password", "password", "join_password", "Password", "server-password"],
       password,
-      "set password"
+      "set password",
+      (key) => normalizeKey(key).includes("password")
     );
   }
 
@@ -92,7 +93,8 @@ export class NitradoClient {
     return this.updateFirstSetting(
       ["ServerPassword", "server_password", "password", "join_password", "Password", "server-password"],
       "",
-      "remove password"
+      "remove password",
+      (key) => normalizeKey(key).includes("password")
     );
   }
 
@@ -148,11 +150,11 @@ export class NitradoClient {
     return data?.data ?? data;
   }
 
-  async updateFirstSetting(keys, value, actionLabel) {
+  async updateFirstSetting(keys, value, actionLabel, isAllowedKey = () => true) {
     const errors = [];
     const discoveredSettings = await this.safeGetSettings();
     const discoveredKeys = settingCandidates(discoveredSettings, keys);
-    const keysToTry = [...uniqueSettingTargets(discoveredKeys, keys)];
+    const keysToTry = [...uniqueSettingTargets(discoveredKeys, keys)].filter((target) => isAllowedKey(target.key));
 
     for (const target of keysToTry) {
       try {
@@ -329,13 +331,11 @@ function settingValue(value) {
 
 function settingCandidates(settings, preferredKeys) {
   const needles = preferredKeys.map(normalizeKey);
-  const looseNeedles = ["server", "name", "password", "players", "slots"];
 
   return settings
     .filter((setting) => {
       const haystack = normalizeKey(`${setting.key} ${setting.label} ${setting.path}`);
-      return needles.some((needle) => haystack.includes(needle) || needle.includes(haystack)) ||
-        looseNeedles.some((needle) => haystack.includes(needle));
+      return needles.some((needle) => haystack.includes(needle) || needle.includes(haystack));
     })
     .map((setting) => ({
       key: setting.key,
