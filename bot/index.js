@@ -3,7 +3,7 @@ import { getBotConfig, hasRequiredBotConfig } from "./env.js";
 import { handleServerCommand } from "./commands/server.js";
 import { handleNitradoCommand, handleNitradoLinkModal } from "./commands/nitrado.js";
 import { registerBotCommands } from "./registerCommands.js";
-import { getGuildServer } from "./storage/guildServers.js";
+import { getGuildServer, getGuildServerStorageStatus } from "./storage/guildServers.js";
 
 let discordClient;
 const botStatus = {
@@ -93,7 +93,10 @@ export async function startDiscordBot() {
 }
 
 export function getDiscordBotStatus() {
-  return { ...botStatus };
+  return {
+    ...botStatus,
+    guildServerStorage: getGuildServerStorageStatus()
+  };
 }
 
 function setBotStatus(nextStatus) {

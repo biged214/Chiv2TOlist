@@ -51,6 +51,8 @@ nitrado_guild_servers
 
 The migration seeds only the default region names. Player and submission data can be entered manually afterward.
 
+The Discord/Nitrado server links are stored in `nitrado_guild_servers` when Railway MySQL variables are present. Without MySQL variables, the bot falls back to local JSON storage, which is not persistent across Railway redeploys.
+
 ## Seed Manually
 
 After the migration:

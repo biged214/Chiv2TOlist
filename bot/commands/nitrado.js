@@ -6,7 +6,13 @@ import {
   TextInputBuilder,
   TextInputStyle
 } from "discord.js";
-import { deleteGuildServer, getGuildServer, hasTokenEncryption, saveGuildServer } from "../storage/guildServers.js";
+import {
+  deleteGuildServer,
+  getGuildServer,
+  getGuildServerStorageStatus,
+  hasTokenEncryption,
+  saveGuildServer
+} from "../storage/guildServers.js";
 
 export const nitradoCommand = new SlashCommandBuilder()
   .setName("nitrado")
@@ -88,7 +94,7 @@ export async function handleNitradoLinkModal(interaction) {
   });
 
   await interaction.reply({
-    content: "Linked this Discord server to the Nitrado service. Try `/server action:status` next.",
+    content: "Linked this Discord server to the Nitrado service. Try `/server status` next.",
     ephemeral: true
   });
 }
@@ -130,7 +136,7 @@ async function showLinkInfo(interaction) {
   }
 
   await interaction.reply({
-    content: `This Discord server is linked to Nitrado service ID ${linked.serviceId}.`,
+    content: `This Discord server is linked to Nitrado service ID ${linked.serviceId}. Storage: ${getGuildServerStorageStatus().backend}.`,
     ephemeral: true
   });
 }
