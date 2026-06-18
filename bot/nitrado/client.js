@@ -86,7 +86,7 @@ export class NitradoClient {
       password,
       "set password",
       (key) => normalizeKey(key) === "serverpassword",
-      ["ServerName"]
+      ["category:config"]
     );
   }
 
@@ -96,7 +96,7 @@ export class NitradoClient {
       "",
       "remove password",
       (key) => normalizeKey(key) === "serverpassword",
-      ["ServerName"]
+      ["category:config"]
     );
   }
 
@@ -159,9 +159,20 @@ export class NitradoClient {
     const relatedCategories = settingCandidates(discoveredSettings, relatedCategoryKeys)
       .map((target) => categoryFromPath(target.path))
       .filter(Boolean);
+    const explicitCategories = relatedCategoryKeys
+      .filter((key) => String(key).startsWith("category:"))
+      .map((key) => String(key).slice("category:".length))
+      .filter(Boolean);
     const keysToTry = [...uniqueSettingTargets(discoveredKeys, keys, relatedCategories)].filter((target) =>
       isAllowedKey(target.key)
     );
+    for (const category of explicitCategories) {
+      for (const key of keys) {
+        if (isAllowedKey(key) && !keysToTry.some((target) => target.key === key && target.path === category)) {
+          keysToTry.unshift({ key, path: category });
+        }
+      }
+    }
 
     for (const target of keysToTry) {
       try {
@@ -386,16 +397,19 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
   const attempts = [];
   const encodedCategory = encodeURIComponent(category);
   const encodedKey = encodeURIComponent(key);
-  const query = category
-    ? `category=${encodedCategory}&key=${encodedKey}`
-    : "";
 
   if (category) {
     attempts.push({
-      label: `query ${query}`,
-      path: `/services/${serviceId}/gameservers/settings?${query}`,
+      label: `category path key/value ${category}/${key}`,
+      path: `/services/${serviceId}/gameservers/settings/${encodedCategory}`,
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ value: String(value ?? "") }).toString()
+      body: new URLSearchParams({ key, value: String(value ?? "") }).toString()
+    });
+    attempts.push({
+      label: `category path direct ${category}/${key}`,
+      path: `/services/${serviceId}/gameservers/settings/${encodedCategory}`,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ [key]: String(value ?? "") }).toString()
     });
     attempts.push({
       label: `path ${category}/${key}`,
@@ -408,6 +422,12 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
       path: `/services/${serviceId}/gameservers/settings`,
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ category, key, value: String(value ?? "") }).toString()
+    });
+    attempts.push({
+      label: `query category direct ${category}/${key}`,
+      path: `/services/${serviceId}/gameservers/settings?category=${encodedCategory}`,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ [key]: String(value ?? "") }).toString()
     });
   }
 
