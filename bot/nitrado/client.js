@@ -237,20 +237,12 @@ export class NitradoClient {
   }
 
   async updateGamePropertyOrConfigFile(key, value, actionLabel) {
-    const propertyErrors = [];
-
     try {
       return await this.updateGameProperty(key, value, actionLabel);
     } catch (error) {
-      propertyErrors.push(error.message || "Unknown error");
       if (!isRetryablePropertyError(error)) throw error;
-    }
-
-    try {
-      return await this.updateGameConfigFileSetting(key, value, actionLabel);
-    } catch (error) {
       throw new NitradoError(
-        `Could not update ${key} through games/properties or file access. Properties error: ${propertyErrors.join("; ")}. File error: ${error.message || "Unknown error"}`
+        `Could not update ${key} through Nitrado game properties. ${error.message || "Unknown error"} File fallback is paused to avoid Nitrado rate limits until we find the real config path with /server filescan.`
       );
     }
   }
@@ -287,6 +279,7 @@ export class NitradoClient {
   }
 
   async scanFileRoots() {
+    const hints = await this.fileRootHints();
     const paths = [
       "/",
       "/games",
@@ -296,11 +289,12 @@ export class NitradoClient {
       "/Chivalry2",
       "/Chivalry",
       "/server",
-      "/home"
+      "/home",
+      ...hints
     ];
 
     const results = [];
-    for (const path of paths) {
+    for (const path of [...new Set(paths.filter(Boolean))]) {
       try {
         const result = await this.listFiles(path);
         results.push({
@@ -318,6 +312,40 @@ export class NitradoClient {
     }
 
     return results;
+  }
+
+  async fileRootHints() {
+    const debug = await this.getServiceDebug();
+    const values = [
+      findNestedValue(debug, "gameserver.gameserver.username"),
+      findNestedValue(debug, "service.details.folder_short"),
+      findNestedValue(debug, "service.details.portlist_short"),
+      findNestedValue(debug, "service.details.game"),
+      findNestedValue(debug, "gameserver.gameserver.game")
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    const username = values.find((value) => /^ni\d+_\d+$/i.test(value));
+    const folders = values.filter((value) => !/^ni\d+_\d+$/i.test(value)).map((value) => value.replace(/\s+/g, ""));
+    const hints = [];
+
+    for (const folder of folders) {
+      hints.push(`/${folder}`, `/games/${folder}`, `/server/${folder}`);
+    }
+
+    if (username) {
+      hints.push(`/${username}`, `/home/${username}`, `/games/${username}`, `/server/${username}`);
+      for (const folder of folders) {
+        hints.push(
+          `/${username}/${folder}`,
+          `/home/${username}/${folder}`,
+          `/games/${username}/${folder}`,
+          `/server/${username}/${folder}`
+        );
+      }
+    }
+
+    return hints;
   }
 
   async findConfigFiles() {
@@ -1038,6 +1066,13 @@ function normalizeFileListResult(data, path = "/") {
 function objectKeys(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return [];
   return Object.keys(value).slice(0, 12);
+}
+
+function findNestedValue(value, path) {
+  return String(path || "")
+    .split(".")
+    .filter(Boolean)
+    .reduce((current, key) => (current && typeof current === "object" ? current[key] : undefined), value);
 }
 
 function normalizeFilePath(path) {
