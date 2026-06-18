@@ -225,7 +225,7 @@ function formatNitradoError(error) {
     return "Nitrado request failed: Not Found. This action may not be available for this Chivalry 2 service state.";
   }
 
-  if (message.toLowerCase().includes("serverpassword")) {
+  if (message.toLowerCase().includes("public settings endpoint")) {
     return [
       "Nitrado did not apply the ServerPassword setting through the public settings endpoint.",
       "Password control is disabled until we map the correct Nitrado file/config API path."

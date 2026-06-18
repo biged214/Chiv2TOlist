@@ -81,23 +81,11 @@ export class NitradoClient {
   }
 
   async setGameserverPassword(password) {
-    return this.updateFirstSetting(
-      ["ServerPassword"],
-      password,
-      "set password",
-      (key) => normalizeKey(key) === "serverpassword",
-      ["category:config"]
-    );
+    return this.updateGameConfigFileSetting("ServerPassword", password, "set password");
   }
 
   async removeGameserverPassword() {
-    return this.updateFirstSetting(
-      ["ServerPassword"],
-      "",
-      "remove password",
-      (key) => normalizeKey(key) === "serverpassword",
-      ["category:config"]
-    );
+    return this.updateGameConfigFileSetting("ServerPassword", "", "remove password");
   }
 
   async setGameserverMaxPlayers(maxPlayers) {
@@ -156,6 +144,239 @@ export class NitradoClient {
     }
 
     return data?.data ?? data;
+  }
+
+  async requestRaw(path, options = {}) {
+    if (!this.token) {
+      throw new NitradoError("Missing NITRADO_TOKEN.");
+    }
+
+    if (options.requireServiceId !== false && !this.serviceId) {
+      throw new NitradoError("Missing NITRADO_SERVICE_ID.");
+    }
+
+    const headers = {
+      Authorization: `Bearer ${this.token}`,
+      Accept: options.accept || "*/*",
+      ...(options.body instanceof FormData ? {} : options.headers || {}),
+      ...(options.body instanceof FormData ? options.headers || {} : {})
+    };
+
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      ...options,
+      headers
+    });
+
+    const text = await response.text();
+    const data = parseJson(text);
+
+    if (!response.ok || data?.status === "error") {
+      throw new NitradoError(nitradoErrorMessage(data, response.status), {
+        statusCode: response.status,
+        details: data
+      });
+    }
+
+    return {
+      contentType: response.headers.get("content-type") || "",
+      text,
+      data: data?.data ?? data
+    };
+  }
+
+  async updateGameConfigFileSetting(key, value, actionLabel) {
+    const errors = [];
+    const files = await this.findConfigFiles();
+
+    for (const file of files) {
+      try {
+        const original = await this.downloadFile(file);
+        const updated = updateIniValue(original, key, value);
+        if (updated === original) {
+          return {
+            action: actionLabel,
+            ok: true,
+            message: `${key} was already ${value ? "set to that value" : "empty"} in ${file}.`
+          };
+        }
+
+        await this.uploadFile(file, updated);
+        const verified = await this.downloadFile(file);
+        if (readIniValue(verified, key) !== String(value ?? "")) {
+          throw new NitradoError(`${key} did not verify after file upload.`);
+        }
+
+        return {
+          action: actionLabel,
+          ok: true,
+          message: `Updated ${key} in ${file}. Restart the server for the change to apply.`
+        };
+      } catch (error) {
+        errors.push(`${file}: ${error.message || "Unknown error"}`);
+        if (!isRetryableFileError(error)) throw error;
+      }
+    }
+
+    throw new NitradoError(
+      `Could not update ${key} through Nitrado file access. Tried likely config files. Last errors: ${errors.slice(-4).join("; ")}`
+    );
+  }
+
+  async findConfigFiles() {
+    const likelyFiles = [
+      "/games/chivalry2/Chivalry/Saved/Config/LinuxServer/Game.ini",
+      "/games/chivalry2/Chivalry/Saved/Config/WindowsServer/Game.ini",
+      "/games/Chivalry2/Chivalry/Saved/Config/LinuxServer/Game.ini",
+      "/games/Chivalry2/Chivalry/Saved/Config/WindowsServer/Game.ini",
+      "/chivalry2/Chivalry/Saved/Config/LinuxServer/Game.ini",
+      "/chivalry2/Chivalry/Saved/Config/WindowsServer/Game.ini",
+      "/Chivalry2/Chivalry/Saved/Config/LinuxServer/Game.ini",
+      "/Chivalry2/Chivalry/Saved/Config/WindowsServer/Game.ini"
+    ];
+
+    const discovered = await this.discoverConfigFiles().catch(() => []);
+    return [...new Set([...discovered, ...likelyFiles])];
+  }
+
+  async discoverConfigFiles() {
+    const queue = ["/", "/games", "/games/chivalry2", "/games/Chivalry2"];
+    const seen = new Set();
+    const files = [];
+
+    while (queue.length && seen.size < 80) {
+      const directory = queue.shift();
+      if (!directory || seen.has(directory)) continue;
+      seen.add(directory);
+
+      let entries;
+      try {
+        entries = await this.listFileServerDirectory(directory);
+      } catch {
+        continue;
+      }
+
+      for (const entry of entries) {
+        const path = normalizeFilePath(entry.path || `${directory.replace(/\/$/, "")}/${entry.name || ""}`);
+        if (!path || seen.has(path)) continue;
+
+        if (entry.type === "dir" || entry.isDirectory) {
+          if (isLikelyConfigDirectory(path)) queue.push(path);
+          continue;
+        }
+
+        if (isLikelyChivalryConfigFile(path)) files.push(path);
+      }
+    }
+
+    return files;
+  }
+
+  async listFileServerDirectory(directory) {
+    const encodedDirectory = encodeURIComponent(directory);
+    const attempts = [
+      `/services/${this.serviceId}/gameservers/file_server/list?dir=${encodedDirectory}`,
+      `/services/${this.serviceId}/gameservers/file_server/list?path=${encodedDirectory}`,
+      `/services/${this.serviceId}/gameservers/file_server/list?directory=${encodedDirectory}`
+    ];
+    const errors = [];
+
+    for (const path of attempts) {
+      try {
+        const data = await this.request(path);
+        return normalizeFileEntries(data);
+      } catch (error) {
+        errors.push(error.message || "Unknown error");
+        if (!isRetryableFileError(error)) throw error;
+      }
+    }
+
+    throw new NitradoError(`Could not list Nitrado file directory ${directory}: ${errors.slice(-1)[0] || "Unknown error"}`);
+  }
+
+  async downloadFile(filePath) {
+    const encodedFile = encodeURIComponent(filePath);
+    const attempts = [
+      `/services/${this.serviceId}/gameservers/file_server/download?file=${encodedFile}`,
+      `/services/${this.serviceId}/gameservers/file_server/download?path=${encodedFile}`
+    ];
+    const errors = [];
+
+    for (const path of attempts) {
+      try {
+        const response = await this.requestRaw(path, { accept: "text/plain,*/*" });
+        if (typeof response.data?.url === "string") {
+          return this.downloadExternalFile(response.data.url);
+        }
+
+        if (typeof response.data?.content === "string") return response.data.content;
+        if (!response.contentType.includes("application/json")) return response.text;
+      } catch (error) {
+        errors.push(error.message || "Unknown error");
+        if (!isRetryableFileError(error)) throw error;
+      }
+    }
+
+    throw new NitradoError(`Could not download ${filePath}: ${errors.slice(-1)[0] || "Unknown error"}`);
+  }
+
+  async downloadExternalFile(url) {
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        Accept: "text/plain,*/*"
+      }
+    });
+
+    const text = await response.text();
+    if (!response.ok) {
+      throw new NitradoError(`External file download failed with HTTP ${response.status}.`);
+    }
+
+    return text;
+  }
+
+  async uploadFile(filePath, content) {
+    const encodedFile = encodeURIComponent(filePath);
+    const directory = filePath.split("/").slice(0, -1).join("/") || "/";
+    const filename = filePath.split("/").filter(Boolean).pop() || "Game.ini";
+    const errors = [];
+    const attempts = [
+      {
+        label: "multipart file path field",
+        path: `/services/${this.serviceId}/gameservers/file_server/upload`,
+        body: fileUploadFormData({ path: filePath, filename, content })
+      },
+      {
+        label: "multipart directory path field",
+        path: `/services/${this.serviceId}/gameservers/file_server/upload`,
+        body: fileUploadFormData({ path: directory, filename, content })
+      },
+      {
+        label: "multipart file query",
+        path: `/services/${this.serviceId}/gameservers/file_server/upload?file=${encodedFile}`,
+        body: fileUploadFormData({ filename, content })
+      },
+      {
+        label: "multipart directory query",
+        path: `/services/${this.serviceId}/gameservers/file_server/upload?path=${encodeURIComponent(directory)}`,
+        body: fileUploadFormData({ filename, content })
+      }
+    ];
+
+    for (const attempt of attempts) {
+      try {
+        await this.request(attempt.path, {
+          method: "POST",
+          body: attempt.body
+        });
+        return;
+      } catch (error) {
+        errors.push(`${attempt.label}: ${error.message || "Unknown error"}`);
+        if (!isRetryableFileError(error)) throw error;
+      }
+    }
+
+    throw new NitradoError(`Could not upload ${filePath}. Last errors: ${errors.slice(-3).join("; ")}`);
   }
 
   async updateFirstSetting(keys, value, actionLabel, isAllowedKey = () => true, relatedCategoryKeys = []) {
@@ -505,11 +726,102 @@ function normalizeService(service) {
   };
 }
 
+function normalizeFileEntries(data) {
+  const root = data?.entries || data?.files || data?.file_server || data?.list || data;
+  const entries = Array.isArray(root) ? root : Array.isArray(root?.entries) ? root.entries : Array.isArray(root?.files) ? root.files : [];
+
+  return entries
+    .map((entry) => {
+      if (typeof entry === "string") {
+        return {
+          name: entry.split("/").filter(Boolean).pop() || entry,
+          path: normalizeFilePath(entry),
+          type: looksLikeFile(entry) ? "file" : "dir"
+        };
+      }
+
+      const name = entry?.name || entry?.basename || entry?.filename || "";
+      const path = normalizeFilePath(entry?.path || entry?.file || entry?.dir || name);
+      const type = String(entry?.type || entry?.kind || "").toLowerCase();
+      const isDirectory = Boolean(entry?.isDirectory || entry?.is_dir || entry?.directory) || type === "dir" || type === "directory";
+
+      return {
+        name,
+        path,
+        type: isDirectory ? "dir" : "file",
+        isDirectory
+      };
+    })
+    .filter((entry) => entry.path || entry.name);
+}
+
+function normalizeFilePath(path) {
+  const value = String(path || "").replace(/\\/g, "/").replace(/\/+/g, "/");
+  if (!value || value === ".") return "";
+  return value.startsWith("/") ? value : `/${value}`;
+}
+
+function looksLikeFile(path) {
+  return /\.[a-z0-9]{2,8}$/i.test(String(path || ""));
+}
+
+function isLikelyConfigDirectory(path) {
+  const normalized = normalizeKey(path);
+  return (
+    normalized.includes("chivalry") ||
+    normalized.includes("chiv") ||
+    normalized.includes("saved") ||
+    normalized.includes("config") ||
+    normalized.includes("linuxserver") ||
+    normalized.includes("windowsserver")
+  );
+}
+
+function isLikelyChivalryConfigFile(path) {
+  const normalized = normalizeFilePath(path).toLowerCase();
+  return (
+    normalized.endsWith("/game.ini") ||
+    normalized.endsWith("/gameserver.ini") ||
+    normalized.endsWith("/serversettings.ini")
+  );
+}
+
+function readIniValue(content, key) {
+  const pattern = new RegExp(`^(${escapeRegExp(key)}\\s*=)(.*)$`, "im");
+  const match = String(content || "").match(pattern);
+  return match ? match[2].trim() : "";
+}
+
+function updateIniValue(content, key, value) {
+  const text = String(content || "");
+  const stringValue = String(value ?? "");
+  const pattern = new RegExp(`^(${escapeRegExp(key)}\\s*=).*$`, "im");
+
+  if (pattern.test(text)) {
+    return text.replace(pattern, `$1${stringValue}`);
+  }
+
+  const lineEnding = text.includes("\r\n") ? "\r\n" : "\n";
+  const prefix = text.endsWith("\n") || !text ? "" : lineEnding;
+  return `${text}${prefix}${key}=${stringValue}${lineEnding}`;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function formData(fields) {
   const data = new FormData();
   for (const [key, value] of Object.entries(fields)) {
     data.append(key, value);
   }
+  return data;
+}
+
+function fileUploadFormData({ path, filename, content }) {
+  const data = new FormData();
+  if (path) data.append("path", path);
+  data.append("file", new Blob([content], { type: "text/plain" }), filename);
   return data;
 }
 
@@ -537,5 +849,20 @@ function isRetryableSettingError(error) {
     message.includes("no key given") ||
     message.includes("invalid") ||
     message.includes("unknown")
+  );
+}
+
+function isRetryableFileError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    error?.statusCode === 400 ||
+    error?.statusCode === 404 ||
+    error?.statusCode === 405 ||
+    error?.statusCode === 422 ||
+    message.includes("not found") ||
+    message.includes("invalid") ||
+    message.includes("unknown") ||
+    message.includes("file") ||
+    message.includes("path")
   );
 }
