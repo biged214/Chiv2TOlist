@@ -26,6 +26,20 @@ export class NitradoClient {
     return normalizeSettings(data);
   }
 
+  async getServiceDebug() {
+    const [gameserverData, services] = await Promise.all([
+      this.request(`/services/${this.serviceId}/gameservers`).catch((error) => ({ error: error.message || "Unknown error" })),
+      this.listServices().catch(() => [])
+    ]);
+    const service = services.find((entry) => String(entry.id) === String(this.serviceId));
+
+    return {
+      serviceId: this.serviceId,
+      service: sanitizeDebugValue(service?.raw || service || {}),
+      gameserver: sanitizeDebugValue(gameserverData)
+    };
+  }
+
   async listServices() {
     const data = await this.request("/services", { requireServiceId: false });
     const services = Array.isArray(data?.services) ? data.services : Array.isArray(data) ? data : [];
@@ -224,6 +238,40 @@ export class NitradoClient {
 
   async listFiles(directory = "/") {
     return this.listFileServerDirectory(normalizeNitradoInputPath(directory));
+  }
+
+  async scanFileRoots() {
+    const paths = [
+      "/",
+      "/games",
+      "/gameserver",
+      "/ftproot",
+      "/chivalry2",
+      "/Chivalry2",
+      "/Chivalry",
+      "/server",
+      "/home"
+    ];
+
+    const results = [];
+    for (const path of paths) {
+      try {
+        const result = await this.listFiles(path);
+        results.push({
+          path: result.path || path,
+          count: result.entries.length,
+          sample: result.entries.slice(0, 5).map((entry) => entry.path || entry.name).filter(Boolean),
+          rawKeys: result.rawKeys || []
+        });
+      } catch (error) {
+        results.push({
+          path,
+          error: error.message || "Unknown error"
+        });
+      }
+    }
+
+    return results;
   }
 
   async findConfigFiles() {
@@ -793,6 +841,30 @@ function normalizeService(service) {
     details: service?.details || {},
     raw: service
   };
+}
+
+function sanitizeDebugValue(value, keyPath = "") {
+  if (Array.isArray(value)) {
+    return value.slice(0, 8).map((entry, index) => sanitizeDebugValue(entry, `${keyPath}.${index}`));
+  }
+
+  if (!value || typeof value !== "object") {
+    if (isSensitiveKey(keyPath)) return value ? "[hidden]" : value;
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .slice(0, 80)
+      .map(([key, entryValue]) => {
+        const nextKeyPath = keyPath ? `${keyPath}.${key}` : key;
+        return [key, isSensitiveKey(nextKeyPath) ? "[hidden]" : sanitizeDebugValue(entryValue, nextKeyPath)];
+      })
+  );
+}
+
+function isSensitiveKey(key) {
+  return /password|token|secret|auth|key|credential/i.test(String(key || ""));
 }
 
 function normalizeFileEntries(data) {
