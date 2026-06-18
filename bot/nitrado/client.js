@@ -400,6 +400,18 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
 
   if (category) {
     attempts.push({
+      label: `category path nested settings ${category}/${key}`,
+      path: `/services/${serviceId}/gameservers/settings/${encodedCategory}`,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ [`settings[${key}]`]: String(value ?? "") }).toString()
+    });
+    attempts.push({
+      label: `category path json settings ${category}/${key}`,
+      path: `/services/${serviceId}/gameservers/settings/${encodedCategory}`,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: { [key]: value } })
+    });
+    attempts.push({
       label: `category path key/value ${category}/${key}`,
       path: `/services/${serviceId}/gameservers/settings/${encodedCategory}`,
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -422,6 +434,18 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
       path: `/services/${serviceId}/gameservers/settings`,
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ category, key, value: String(value ?? "") }).toString()
+    });
+    attempts.push({
+      label: `form category nested settings ${category}/${key}`,
+      path: `/services/${serviceId}/gameservers/settings`,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ category, [`settings[${key}]`]: String(value ?? "") }).toString()
+    });
+    attempts.push({
+      label: `json category settings ${category}/${key}`,
+      path: `/services/${serviceId}/gameservers/settings`,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ category, settings: { [key]: value } })
     });
     attempts.push({
       label: `query category direct ${category}/${key}`,
