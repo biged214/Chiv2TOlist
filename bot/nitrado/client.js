@@ -272,11 +272,14 @@ export class NitradoClient {
   }
 
   async listFileServerDirectory(directory) {
-    const encodedDirectory = encodeURIComponent(directory);
+    const encodedDirectory = fileQueryValue(directory);
+    const relativeDirectory = fileQueryValue(trimLeadingSlash(directory));
     const attempts = [
       `/services/${this.serviceId}/gameservers/file_server/list?dir=${encodedDirectory}`,
       `/services/${this.serviceId}/gameservers/file_server/list?path=${encodedDirectory}`,
-      `/services/${this.serviceId}/gameservers/file_server/list?directory=${encodedDirectory}`
+      `/services/${this.serviceId}/gameservers/file_server/list?directory=${encodedDirectory}`,
+      `/services/${this.serviceId}/gameservers/file_server/list?dir=${relativeDirectory}`,
+      `/services/${this.serviceId}/gameservers/file_server/list?path=${relativeDirectory}`
     ];
     const errors = [];
 
@@ -294,16 +297,38 @@ export class NitradoClient {
   }
 
   async downloadFile(filePath) {
-    const encodedFile = encodeURIComponent(filePath);
+    const encodedFile = fileQueryValue(filePath);
+    const relativeFile = trimLeadingSlash(filePath);
+    const encodedRelativeFile = fileQueryValue(relativeFile);
     const attempts = [
       `/services/${this.serviceId}/gameservers/file_server/download?file=${encodedFile}`,
-      `/services/${this.serviceId}/gameservers/file_server/download?path=${encodedFile}`
+      `/services/${this.serviceId}/gameservers/file_server/download?path=${encodedFile}`,
+      `/services/${this.serviceId}/gameservers/file_server/download?file=${encodedRelativeFile}`,
+      `/services/${this.serviceId}/gameservers/file_server/download?path=${encodedRelativeFile}`,
+      {
+        path: `/services/${this.serviceId}/gameservers/file_server/download`,
+        options: {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ file: filePath }).toString()
+        }
+      },
+      {
+        path: `/services/${this.serviceId}/gameservers/file_server/download`,
+        options: {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ file: relativeFile }).toString()
+        }
+      }
     ];
     const errors = [];
 
-    for (const path of attempts) {
+    for (const attempt of attempts) {
+      const path = typeof attempt === "string" ? attempt : attempt.path;
+      const options = typeof attempt === "string" ? {} : attempt.options;
       try {
-        const response = await this.requestRaw(path, { accept: "text/plain,*/*" });
+        const response = await this.requestRaw(path, { accept: "text/plain,*/*", ...options });
         if (typeof response.data?.url === "string") {
           return this.downloadExternalFile(response.data.url);
         }
@@ -336,8 +361,11 @@ export class NitradoClient {
   }
 
   async uploadFile(filePath, content) {
-    const encodedFile = encodeURIComponent(filePath);
+    const encodedFile = fileQueryValue(filePath);
+    const relativeFile = trimLeadingSlash(filePath);
+    const encodedRelativeFile = fileQueryValue(relativeFile);
     const directory = filePath.split("/").slice(0, -1).join("/") || "/";
+    const relativeDirectory = trimLeadingSlash(directory);
     const filename = filePath.split("/").filter(Boolean).pop() || "Game.ini";
     const errors = [];
     const attempts = [
@@ -357,8 +385,18 @@ export class NitradoClient {
         body: fileUploadFormData({ filename, content })
       },
       {
+        label: "multipart relative file query",
+        path: `/services/${this.serviceId}/gameservers/file_server/upload?file=${encodedRelativeFile}`,
+        body: fileUploadFormData({ filename, content })
+      },
+      {
         label: "multipart directory query",
-        path: `/services/${this.serviceId}/gameservers/file_server/upload?path=${encodeURIComponent(directory)}`,
+        path: `/services/${this.serviceId}/gameservers/file_server/upload?path=${fileQueryValue(directory)}`,
+        body: fileUploadFormData({ filename, content })
+      },
+      {
+        label: "multipart relative directory query",
+        path: `/services/${this.serviceId}/gameservers/file_server/upload?path=${fileQueryValue(relativeDirectory)}`,
         body: fileUploadFormData({ filename, content })
       }
     ];
@@ -759,6 +797,14 @@ function normalizeFilePath(path) {
   const value = String(path || "").replace(/\\/g, "/").replace(/\/+/g, "/");
   if (!value || value === ".") return "";
   return value.startsWith("/") ? value : `/${value}`;
+}
+
+function trimLeadingSlash(path) {
+  return String(path || "").replace(/^\/+/, "");
+}
+
+function fileQueryValue(path) {
+  return encodeURI(String(path || "")).replace(/#/g, "%23").replace(/\?/g, "%3F").replace(/&/g, "%26");
 }
 
 function looksLikeFile(path) {
