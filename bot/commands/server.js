@@ -144,8 +144,8 @@ async function runServerSubcommand(subcommand, interaction, nitradoClient) {
 
   if (subcommand === "files") {
     const path = interaction.options.getString("path") || "/";
-    const files = await nitradoClient.listFiles(path);
-    return formatFiles(path, files);
+    const result = await nitradoClient.listFiles(path);
+    return formatFiles(path, result);
   }
 
   if (subcommand === "restart") return nitradoClient.restartGameserver();
@@ -213,12 +213,15 @@ function formatSettings(settings, page) {
   return lines.join("\n").slice(0, 1900);
 }
 
-function formatFiles(path, entries) {
+function formatFiles(path, result) {
+  const entries = result.entries || [];
+  const displayPath = result.path || path;
   if (!entries.length) {
-    return `No file-server entries found for ${path}.`;
+    const keys = result.rawKeys?.length ? ` Returned keys: ${result.rawKeys.join(", ")}.` : "";
+    return `No file-server entries found for ${displayPath}.${keys}`;
   }
 
-  const lines = [`Entries for ${path}:`];
+  const lines = [`Entries for ${displayPath}:`];
   for (const entry of entries.slice(0, 35)) {
     const type = entry.type === "dir" || entry.isDirectory ? "dir" : "file";
     lines.push(`${type}: ${entry.path || entry.name}`);

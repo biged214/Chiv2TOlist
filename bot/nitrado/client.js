@@ -223,7 +223,7 @@ export class NitradoClient {
   }
 
   async listFiles(directory = "/") {
-    return this.listFileServerDirectory(directory);
+    return this.listFileServerDirectory(normalizeNitradoInputPath(directory));
   }
 
   async findConfigFiles() {
@@ -254,7 +254,7 @@ export class NitradoClient {
 
       let entries;
       try {
-        entries = await this.listFileServerDirectory(directory);
+        entries = (await this.listFileServerDirectory(directory)).entries;
       } catch {
         continue;
       }
@@ -276,6 +276,7 @@ export class NitradoClient {
   }
 
   async listFileServerDirectory(directory) {
+    directory = normalizeNitradoInputPath(directory);
     const encodedDirectory = fileQueryValue(directory);
     const relativeDirectory = fileQueryValue(trimLeadingSlash(directory));
     const attempts = [
@@ -283,14 +284,40 @@ export class NitradoClient {
       `/services/${this.serviceId}/gameservers/file_server/list?path=${encodedDirectory}`,
       `/services/${this.serviceId}/gameservers/file_server/list?directory=${encodedDirectory}`,
       `/services/${this.serviceId}/gameservers/file_server/list?dir=${relativeDirectory}`,
-      `/services/${this.serviceId}/gameservers/file_server/list?path=${relativeDirectory}`
+      `/services/${this.serviceId}/gameservers/file_server/list?path=${relativeDirectory}`,
+      {
+        path: `/services/${this.serviceId}/gameservers/file_server/list`,
+        options: {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ dir: directory }).toString()
+        }
+      },
+      {
+        path: `/services/${this.serviceId}/gameservers/file_server/list`,
+        options: {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ dir: trimLeadingSlash(directory) }).toString()
+        }
+      },
+      {
+        path: `/services/${this.serviceId}/gameservers/file_server/list`,
+        options: {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ path: directory }).toString()
+        }
+      }
     ];
     const errors = [];
 
-    for (const path of attempts) {
+    for (const attempt of attempts) {
+      const path = typeof attempt === "string" ? attempt : attempt.path;
+      const options = typeof attempt === "string" ? {} : attempt.options;
       try {
-        const data = await this.request(path);
-        return normalizeFileEntries(data);
+        const data = await this.request(path, options);
+        return normalizeFileListResult(data, directory);
       } catch (error) {
         errors.push(error.message || "Unknown error");
         if (!isRetryableFileError(error)) throw error;
@@ -770,7 +797,13 @@ function normalizeService(service) {
 
 function normalizeFileEntries(data) {
   const root = data?.entries || data?.files || data?.file_server || data?.list || data;
-  const entries = Array.isArray(root) ? root : Array.isArray(root?.entries) ? root.entries : Array.isArray(root?.files) ? root.files : [];
+  const entries = [
+    ...(Array.isArray(root) ? root : []),
+    ...(Array.isArray(root?.entries) ? root.entries : []),
+    ...(Array.isArray(root?.files) ? root.files : []),
+    ...(Array.isArray(root?.folders) ? root.folders.map(markDirectoryEntry) : []),
+    ...(Array.isArray(root?.directories) ? root.directories.map(markDirectoryEntry) : [])
+  ];
 
   return entries
     .map((entry) => {
@@ -797,10 +830,34 @@ function normalizeFileEntries(data) {
     .filter((entry) => entry.path || entry.name);
 }
 
+function markDirectoryEntry(entry) {
+  if (typeof entry === "string") return { path: entry, type: "dir", isDirectory: true };
+  return { ...entry, type: "dir", isDirectory: true };
+}
+
+function normalizeFileListResult(data, path = "/") {
+  return {
+    path,
+    entries: normalizeFileEntries(data),
+    rawKeys: objectKeys(data),
+    rawType: Array.isArray(data) ? "array" : typeof data
+  };
+}
+
+function objectKeys(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  return Object.keys(value).slice(0, 12);
+}
+
 function normalizeFilePath(path) {
   const value = String(path || "").replace(/\\/g, "/").replace(/\/+/g, "/");
   if (!value || value === ".") return "";
   return value.startsWith("/") ? value : `/${value}`;
+}
+
+function normalizeNitradoInputPath(path) {
+  const cleaned = String(path || "/").trim().replace(/^:+/, "");
+  return normalizeFilePath(cleaned || "/");
 }
 
 function trimLeadingSlash(path) {
