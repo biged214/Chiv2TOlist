@@ -95,11 +95,11 @@ export class NitradoClient {
   }
 
   async setGameserverPassword(password) {
-    return this.updateGameConfigFileSetting("ServerPassword", password, "set password");
+    return this.updateGamePropertyOrConfigFile("ServerPassword", password, "set password");
   }
 
   async removeGameserverPassword() {
-    return this.updateGameConfigFileSetting("ServerPassword", "", "remove password");
+    return this.updateGamePropertyOrConfigFile("ServerPassword", "", "remove password");
   }
 
   async setGameserverMaxPlayers(maxPlayers) {
@@ -234,6 +234,52 @@ export class NitradoClient {
     throw new NitradoError(
       `Could not update ${key} through Nitrado file access. Tried likely config files. Last errors: ${errors.slice(-4).join("; ")}`
     );
+  }
+
+  async updateGamePropertyOrConfigFile(key, value, actionLabel) {
+    const propertyErrors = [];
+
+    try {
+      return await this.updateGameProperty(key, value, actionLabel);
+    } catch (error) {
+      propertyErrors.push(error.message || "Unknown error");
+      if (!isRetryablePropertyError(error)) throw error;
+    }
+
+    try {
+      return await this.updateGameConfigFileSetting(key, value, actionLabel);
+    } catch (error) {
+      throw new NitradoError(
+        `Could not update ${key} through games/properties or file access. Properties error: ${propertyErrors.join("; ")}. File error: ${error.message || "Unknown error"}`
+      );
+    }
+  }
+
+  async updateGameProperty(key, value, actionLabel) {
+    const errors = [];
+
+    for (const attempt of gamePropertyUpdateAttempts(this.serviceId, key, value)) {
+      try {
+        const data = await this.request(attempt.path, {
+          method: attempt.method || "POST",
+          headers: attempt.headers,
+          body: attempt.body
+        });
+
+        return {
+          action: actionLabel,
+          ok: true,
+          message:
+            data?.message ||
+            `Nitrado accepted ${actionLabel} for ${key} via games/properties (${attempt.label}). Restart the server for the change to apply.`
+        };
+      } catch (error) {
+        errors.push(`${attempt.label}: ${error.message || "Unknown error"}`);
+        if (!isRetryablePropertyError(error)) throw error;
+      }
+    }
+
+    throw new NitradoError(`Nitrado rejected ${key} via games/properties. Last errors: ${errors.slice(-5).join("; ")}`);
   }
 
   async listFiles(directory = "/") {
@@ -833,6 +879,79 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
   return attempts;
 }
 
+function gamePropertyUpdateAttempts(serviceId, key, value) {
+  const path = `/services/${serviceId}/gameservers/games/properties`;
+  const stringValue = String(value ?? "");
+  const jsonHeaders = { "Content-Type": "application/json" };
+  const formHeaders = { "Content-Type": "application/x-www-form-urlencoded" };
+  const formValue = (payload) => new URLSearchParams(flattenPayload(payload)).toString();
+
+  return [
+    {
+      label: "json properties object",
+      path,
+      headers: jsonHeaders,
+      body: JSON.stringify({ properties: { [key]: stringValue } })
+    },
+    {
+      label: "json settings object",
+      path,
+      headers: jsonHeaders,
+      body: JSON.stringify({ settings: { [key]: stringValue } })
+    },
+    {
+      label: "json direct property",
+      path,
+      headers: jsonHeaders,
+      body: JSON.stringify({ [key]: stringValue })
+    },
+    {
+      label: "json key/value",
+      path,
+      headers: jsonHeaders,
+      body: JSON.stringify({ key, value: stringValue })
+    },
+    {
+      label: "form properties key",
+      path,
+      headers: formHeaders,
+      body: new URLSearchParams({ [`properties[${key}]`]: stringValue }).toString()
+    },
+    {
+      label: "form settings key",
+      path,
+      headers: formHeaders,
+      body: new URLSearchParams({ [`settings[${key}]`]: stringValue }).toString()
+    },
+    {
+      label: "form direct property",
+      path,
+      headers: formHeaders,
+      body: formValue({ [key]: stringValue })
+    },
+    {
+      label: "form key/value",
+      path,
+      headers: formHeaders,
+      body: formValue({ key, value: stringValue })
+    },
+    {
+      label: "put json properties object",
+      path,
+      method: "PUT",
+      headers: jsonHeaders,
+      body: JSON.stringify({ properties: { [key]: stringValue } })
+    },
+    {
+      label: "patch json properties object",
+      path,
+      method: "PATCH",
+      headers: jsonHeaders,
+      body: JSON.stringify({ properties: { [key]: stringValue } })
+    }
+  ];
+}
+
 function normalizeService(service) {
   return {
     id: service?.id || service?.service_id || service?.serviceId || "",
@@ -1028,6 +1147,23 @@ function isRetryableSettingError(error) {
     message.includes("no key given") ||
     message.includes("invalid") ||
     message.includes("unknown")
+  );
+}
+
+function isRetryablePropertyError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    error?.statusCode === 400 ||
+    error?.statusCode === 404 ||
+    error?.statusCode === 405 ||
+    error?.statusCode === 422 ||
+    message.includes("not found") ||
+    message.includes("invalid") ||
+    message.includes("unknown") ||
+    message.includes("property") ||
+    message.includes("properties") ||
+    message.includes("key") ||
+    message.includes("value")
   );
 }
 
