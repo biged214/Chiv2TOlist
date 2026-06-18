@@ -129,14 +129,20 @@ export class NitradoClient {
       throw new NitradoError("Missing NITRADO_SERVICE_ID.");
     }
 
+    const headers = {
+      Authorization: `Bearer ${this.token}`,
+      Accept: "application/json",
+      ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+      ...(options.headers || {})
+    };
+
+    for (const key of Object.keys(headers)) {
+      if (headers[key] === undefined) delete headers[key];
+    }
+
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...options,
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        ...(options.headers || {})
-      }
+      headers
     });
 
     const text = await response.text();
@@ -419,6 +425,12 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
       body: new URLSearchParams({ key, value: String(value ?? "") }).toString()
     });
     attempts.push({
+      label: `multipart category path key/value ${category}/${key}`,
+      path: `/services/${serviceId}/gameservers/settings/${encodedCategory}`,
+      headers: {},
+      body: formData({ key, value: String(value ?? "") })
+    });
+    attempts.push({
       label: `category path direct ${category}/${key}`,
       path: `/services/${serviceId}/gameservers/settings/${encodedCategory}`,
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -438,6 +450,12 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
         body: new URLSearchParams({ category, key, value: String(value ?? "") }).toString()
       });
     }
+    attempts.push({
+      label: `multipart category/key/value ${category}/${key}`,
+      path: `/services/${serviceId}/gameservers/settings`,
+      headers: {},
+      body: formData({ category, key, value: String(value ?? "") })
+    });
     attempts.push({
       label: `form category nested settings ${category}/${key}`,
       path: `/services/${serviceId}/gameservers/settings`,
@@ -487,6 +505,14 @@ function normalizeService(service) {
   };
 }
 
+function formData(fields) {
+  const data = new FormData();
+  for (const [key, value] of Object.entries(fields)) {
+    data.append(key, value);
+  }
+  return data;
+}
+
 function firstNumber(...values) {
   for (const value of values) {
     const number = Number(value);
@@ -508,6 +534,7 @@ function isRetryableSettingError(error) {
     error?.statusCode === 422 ||
     message.includes("not found") ||
     message.includes("no category given") ||
+    message.includes("no key given") ||
     message.includes("invalid") ||
     message.includes("unknown")
   );
