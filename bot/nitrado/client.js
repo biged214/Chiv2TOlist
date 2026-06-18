@@ -85,7 +85,8 @@ export class NitradoClient {
       ["ServerPassword"],
       password,
       "set password",
-      (key) => normalizeKey(key) === "serverpassword"
+      (key) => normalizeKey(key) === "serverpassword",
+      ["ServerName"]
     );
   }
 
@@ -94,7 +95,8 @@ export class NitradoClient {
       ["ServerPassword"],
       "",
       "remove password",
-      (key) => normalizeKey(key) === "serverpassword"
+      (key) => normalizeKey(key) === "serverpassword",
+      ["ServerName"]
     );
   }
 
@@ -150,11 +152,16 @@ export class NitradoClient {
     return data?.data ?? data;
   }
 
-  async updateFirstSetting(keys, value, actionLabel, isAllowedKey = () => true) {
+  async updateFirstSetting(keys, value, actionLabel, isAllowedKey = () => true, relatedCategoryKeys = []) {
     const errors = [];
     const discoveredSettings = await this.safeGetSettings();
     const discoveredKeys = settingCandidates(discoveredSettings, keys);
-    const keysToTry = [...uniqueSettingTargets(discoveredKeys, keys)].filter((target) => isAllowedKey(target.key));
+    const relatedCategories = settingCandidates(discoveredSettings, relatedCategoryKeys)
+      .map((target) => categoryFromPath(target.path))
+      .filter(Boolean);
+    const keysToTry = [...uniqueSettingTargets(discoveredKeys, keys, relatedCategories)].filter((target) =>
+      isAllowedKey(target.key)
+    );
 
     for (const target of keysToTry) {
       try {
@@ -208,37 +215,25 @@ export class NitradoClient {
           : payloads;
 
         for (const body of categorizedPayloads) {
-          try {
-            const data = await this.request(`/services/${this.serviceId}/gameservers/settings`, {
-              method,
-              body: JSON.stringify(body)
-            });
+          for (const attempt of settingUpdateAttempts({ serviceId: this.serviceId, category, key, value, body })) {
+            try {
+              const data = await this.request(attempt.path, {
+                method,
+                headers: attempt.headers,
+                body: attempt.body
+              });
 
-            return {
-              action: actionLabel,
-              ok: true,
-              message: data?.message || `Nitrado accepted ${actionLabel}. Restart the server if the change does not apply immediately.`
-            };
-          } catch (error) {
-            errors.push(`${method} ${JSON.stringify(body)} -> ${error.message || "Unknown error"}`);
-            if (!isRetryableSettingError(error)) throw error;
-          }
-
-          try {
-            const data = await this.request(`/services/${this.serviceId}/gameservers/settings`, {
-              method,
-              headers: { "Content-Type": "application/x-www-form-urlencoded" },
-              body: new URLSearchParams(flattenPayload(body)).toString()
-            });
-
-            return {
-              action: actionLabel,
-              ok: true,
-              message: data?.message || `Nitrado accepted ${actionLabel}. Restart the server if the change does not apply immediately.`
-            };
-          } catch (error) {
-            errors.push(`${method} form ${JSON.stringify(body)} -> ${error.message || "Unknown error"}`);
-            if (!isRetryableSettingError(error)) throw error;
+              return {
+                action: actionLabel,
+                ok: true,
+                message:
+                  data?.message ||
+                  `Nitrado accepted ${actionLabel} for ${key}${category ? ` in ${category}` : ""}. Restart the server if the change does not apply immediately.`
+              };
+            } catch (error) {
+              errors.push(`${method} ${attempt.label} -> ${error.message || "Unknown error"}`);
+              if (!isRetryableSettingError(error)) throw error;
+            }
           }
         }
       }
@@ -349,7 +344,7 @@ function normalizeKey(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function uniqueSettingTargets(discoveredTargets, fallbackKeys) {
+function uniqueSettingTargets(discoveredTargets, fallbackKeys, relatedCategories = []) {
   const targets = [];
   const seen = new Set();
 
@@ -361,9 +356,17 @@ function uniqueSettingTargets(discoveredTargets, fallbackKeys) {
   }
 
   for (const key of fallbackKeys) {
-    if (seen.has(key)) continue;
-    seen.add(key);
-    targets.push({ key, path: "" });
+    for (const category of relatedCategories) {
+      const id = `${key}:${category}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      targets.push({ key, path: category });
+    }
+
+    if (!seen.has(key)) {
+      seen.add(key);
+      targets.push({ key, path: "" });
+    }
   }
 
   return targets;
@@ -377,6 +380,46 @@ function flattenPayload(payload) {
   return Object.fromEntries(
     Object.entries(payload).map(([key, value]) => [key, String(value ?? "")])
   );
+}
+
+function settingUpdateAttempts({ serviceId, category, key, value, body }) {
+  const attempts = [];
+  const encodedCategory = encodeURIComponent(category);
+  const encodedKey = encodeURIComponent(key);
+  const query = category
+    ? `category=${encodedCategory}&key=${encodedKey}`
+    : "";
+
+  attempts.push({
+    label: `json ${JSON.stringify(body)}`,
+    path: `/services/${serviceId}/gameservers/settings`,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+
+  attempts.push({
+    label: `form ${JSON.stringify(body)}`,
+    path: `/services/${serviceId}/gameservers/settings`,
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(flattenPayload(body)).toString()
+  });
+
+  if (category) {
+    attempts.push({
+      label: `query ${query}`,
+      path: `/services/${serviceId}/gameservers/settings?${query}`,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ value: String(value ?? "") }).toString()
+    });
+    attempts.push({
+      label: `path ${category}/${key}`,
+      path: `/services/${serviceId}/gameservers/settings/${encodedCategory}/${encodedKey}`,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ value: String(value ?? "") }).toString()
+    });
+  }
+
+  return attempts;
 }
 
 function normalizeService(service) {
