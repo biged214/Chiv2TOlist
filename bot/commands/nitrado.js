@@ -8,9 +8,9 @@ import {
 } from "discord.js";
 import {
   deleteGuildServer,
-  getGuildServer,
   getGuildServerStorageStatus,
   hasTokenEncryption,
+  listGuildServers,
   saveGuildServer
 } from "../storage/guildServers.js";
 
@@ -18,13 +18,32 @@ export const nitradoCommand = new SlashCommandBuilder()
   .setName("nitrado")
   .setDescription("Link this Discord server to a Nitrado-hosted Chivalry 2 server.")
   .addSubcommand((subcommand) =>
-    subcommand.setName("link").setDescription("Privately enter this server's Nitrado token and service ID.")
+    subcommand
+      .setName("link")
+      .setDescription("Privately enter a Nitrado token and service ID.")
+      .addStringOption((option) =>
+        option
+          .setName("alias")
+          .setDescription("Short name for this server, such as main, duel, or practice.")
+          .setMinLength(1)
+          .setMaxLength(40)
+          .setRequired(false)
+      )
   )
   .addSubcommand((subcommand) =>
-    subcommand.setName("info").setDescription("Show whether this Discord server is linked.")
+    subcommand.setName("info").setDescription("Show linked Nitrado servers for this Discord server.")
   )
   .addSubcommand((subcommand) =>
-    subcommand.setName("unlink").setDescription("Remove this Discord server's linked Nitrado credentials.")
+    subcommand
+      .setName("unlink")
+      .setDescription("Remove linked Nitrado credentials.")
+      .addStringOption((option) =>
+        option
+          .setName("alias")
+          .setDescription("Server alias to remove. Leave empty to remove all linked servers.")
+          .setMaxLength(40)
+          .setRequired(false)
+      )
   )
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
@@ -40,7 +59,7 @@ export async function handleNitradoCommand(interaction) {
   const subcommand = interaction.options.getSubcommand();
 
   if (subcommand === "link") {
-    await showLinkModal(interaction);
+    await showLinkModal(interaction, interaction.options.getString("alias") || "default");
     return;
   }
 
@@ -50,9 +69,14 @@ export async function handleNitradoCommand(interaction) {
   }
 
   if (subcommand === "unlink") {
-    const deleted = await deleteGuildServer(interaction.guildId);
+    const alias = interaction.options.getString("alias") || "";
+    const deleted = await deleteGuildServer(interaction.guildId, alias);
     await interaction.reply({
-      content: deleted ? "This Discord server is no longer linked to Nitrado." : "No linked Nitrado server was found.",
+      content: deleted
+        ? alias
+          ? `Removed linked Nitrado server \`${normalizeAlias(alias)}\`.`
+          : "This Discord server is no longer linked to Nitrado."
+        : "No matching linked Nitrado server was found.",
       ephemeral: true
     });
   }
@@ -69,6 +93,7 @@ export async function handleNitradoLinkModal(interaction) {
 
   const token = interaction.fields.getTextInputValue("nitrado_token").trim();
   const serviceId = interaction.fields.getTextInputValue("nitrado_service_id").trim();
+  const alias = modalAlias(interaction.customId);
 
   if (!token || !serviceId) {
     await interaction.reply({
@@ -88,21 +113,23 @@ export async function handleNitradoLinkModal(interaction) {
 
   await saveGuildServer({
     guildId: interaction.guildId,
+    alias,
     serviceId,
     token,
     linkedBy: interaction.user.id
   });
 
   await interaction.reply({
-    content: "Linked this Discord server to the Nitrado service. Try `/server status` next.",
+    content: `Linked \`${alias}\` to Nitrado service ID ${serviceId}. Try \`/server status server:${alias}\` next.`,
     ephemeral: true
   });
 }
 
-function showLinkModal(interaction) {
+function showLinkModal(interaction, alias) {
+  const normalizedAlias = normalizeAlias(alias) || "default";
   const modal = new ModalBuilder()
-    .setCustomId("nitrado_link_modal")
-    .setTitle("Link Nitrado Server");
+    .setCustomId(`nitrado_link_modal:${normalizedAlias}`)
+    .setTitle(`Link Nitrado: ${normalizedAlias}`);
 
   const tokenInput = new TextInputBuilder()
     .setCustomId("nitrado_token")
@@ -125,9 +152,9 @@ function showLinkModal(interaction) {
 }
 
 async function showLinkInfo(interaction) {
-  const linked = await getGuildServer(interaction.guildId);
+  const linkedServers = await listGuildServers(interaction.guildId);
 
-  if (!linked) {
+  if (!linkedServers.length) {
     await interaction.reply({
       content: "This Discord server is not linked yet. Use `/nitrado link` to connect it.",
       ephemeral: true
@@ -135,8 +162,23 @@ async function showLinkInfo(interaction) {
     return;
   }
 
+  const lines = linkedServers.map((server) => `\`${server.alias}\`: service ID ${server.serviceId}`);
   await interaction.reply({
-    content: `This Discord server is linked to Nitrado service ID ${linked.serviceId}. Storage: ${getGuildServerStorageStatus().backend}.`,
+    content: [`Linked Nitrado servers:`, ...lines, `Storage: ${getGuildServerStorageStatus().backend}.`].join("\n"),
     ephemeral: true
   });
+}
+
+function normalizeAlias(alias) {
+  return String(alias || "default")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 40) || "default";
+}
+
+function modalAlias(customId) {
+  const [, alias] = String(customId || "").split(":");
+  return normalizeAlias(alias || "default");
 }

@@ -13,14 +13,20 @@ const guildServersFile = path.join(dataDir, "nitrado-guilds.json");
 const encryptionSecret = process.env.BOT_ENCRYPTION_KEY || process.env.SESSION_SECRET || "";
 
 export async function getGuildServer(guildId) {
-  if (hasDatabase()) return getGuildServerFromDatabase(guildId);
+  return getGuildServerByAlias(guildId, "");
+}
+
+export async function getGuildServerByAlias(guildId, alias = "") {
+  if (hasDatabase()) return getGuildServerFromDatabase(guildId, alias);
 
   const data = await readGuildServers();
-  const record = data.guilds?.[guildId];
+  const record = selectJsonGuildServer(data.guilds?.[guildId], alias);
   if (!record) return null;
+  if (record.needsAlias) return record;
 
   return {
     guildId,
+    alias: record.alias || normalizeAlias(alias) || "default",
     serviceId: record.serviceId,
     token: decryptToken(record.token),
     linkedBy: record.linkedBy || "",
@@ -28,29 +34,77 @@ export async function getGuildServer(guildId) {
   };
 }
 
-export async function saveGuildServer({ guildId, serviceId, token, linkedBy }) {
+export async function listGuildServers(guildId) {
+  if (hasDatabase()) return listGuildServersFromDatabase(guildId);
+
+  const data = await readGuildServers();
+  const guildRecord = data.guilds?.[guildId];
+  if (!guildRecord) return [];
+
+  if (guildRecord.servers) {
+    return Object.entries(guildRecord.servers).map(([alias, record]) => ({
+      guildId,
+      alias,
+      serviceId: record.serviceId,
+      linkedBy: record.linkedBy || "",
+      linkedAt: record.linkedAt || ""
+    }));
+  }
+
+  return [
+    {
+      guildId,
+      alias: "default",
+      serviceId: guildRecord.serviceId,
+      linkedBy: guildRecord.linkedBy || "",
+      linkedAt: guildRecord.linkedAt || ""
+    }
+  ];
+}
+
+export async function saveGuildServer({ guildId, alias = "default", serviceId, token, linkedBy }) {
   if (hasDatabase()) {
-    await saveGuildServerToDatabase({ guildId, serviceId, token, linkedBy });
+    await saveGuildServerToDatabase({ guildId, alias, serviceId, token, linkedBy });
     return;
   }
 
   const data = await readGuildServers();
   data.guilds = data.guilds || {};
-  data.guilds[guildId] = {
+  const normalizedAlias = normalizeAlias(alias) || "default";
+  const existingGuild = data.guilds[guildId] || {};
+  const servers = existingGuild.servers || {};
+  if (!existingGuild.servers && existingGuild.serviceId) {
+    servers.default = {
+      serviceId: existingGuild.serviceId,
+      token: existingGuild.token,
+      linkedBy: existingGuild.linkedBy || "",
+      linkedAt: existingGuild.linkedAt || ""
+    };
+  }
+  servers[normalizedAlias] = {
+    alias: normalizedAlias,
     serviceId,
     token: encryptToken(token),
     linkedBy,
     linkedAt: new Date().toISOString()
   };
+  data.guilds[guildId] = { servers };
   await writeGuildServers(data);
 }
 
-export async function deleteGuildServer(guildId) {
-  if (hasDatabase()) return deleteGuildServerFromDatabase(guildId);
+export async function deleteGuildServer(guildId, alias = "") {
+  if (hasDatabase()) return deleteGuildServerFromDatabase(guildId, alias);
 
   const data = await readGuildServers();
-  if (data.guilds?.[guildId]) {
+  const normalizedAlias = normalizeAlias(alias);
+  if (!normalizedAlias && data.guilds?.[guildId]) {
     delete data.guilds[guildId];
+    await writeGuildServers(data);
+    return true;
+  }
+
+  if (normalizedAlias && data.guilds?.[guildId]?.servers?.[normalizedAlias]) {
+    delete data.guilds[guildId].servers[normalizedAlias];
     await writeGuildServers(data);
     return true;
   }
@@ -140,19 +194,29 @@ function hasDatabase() {
   );
 }
 
-async function getGuildServerFromDatabase(guildId) {
+async function getGuildServerFromDatabase(guildId, alias = "") {
   return withDatabase(async (connection) => {
     await ensureGuildServersTable(connection);
-    const [rows] = await connection.execute(
-      "SELECT `guild_id`, `service_id`, `token_payload`, `linked_by`, `linked_at` FROM `nitrado_guild_servers` WHERE `guild_id` = ? LIMIT 1",
-      [guildId]
-    );
+    const normalizedAlias = normalizeAlias(alias);
+    const [rows] = normalizedAlias
+      ? await connection.execute(
+          "SELECT `guild_id`, `alias`, `service_id`, `token_payload`, `linked_by`, `linked_at` FROM `nitrado_guild_servers` WHERE `guild_id` = ? AND `alias` = ? LIMIT 1",
+          [guildId, normalizedAlias]
+        )
+      : await connection.execute(
+          "SELECT `guild_id`, `alias`, `service_id`, `token_payload`, `linked_by`, `linked_at` FROM `nitrado_guild_servers` WHERE `guild_id` = ? ORDER BY `alias` = 'default' DESC, `linked_at` ASC LIMIT 2",
+          [guildId]
+        );
 
     if (!rows.length) return null;
+    if (!normalizedAlias && rows.length > 1) {
+      return { needsAlias: true, choices: rows.map((row) => row.alias) };
+    }
 
     const row = rows[0];
     return {
       guildId: row.guild_id,
+      alias: row.alias || "default",
       serviceId: row.service_id,
       token: decryptToken(JSON.parse(row.token_payload)),
       linkedBy: row.linked_by || "",
@@ -161,28 +225,50 @@ async function getGuildServerFromDatabase(guildId) {
   });
 }
 
-async function saveGuildServerToDatabase({ guildId, serviceId, token, linkedBy }) {
+async function listGuildServersFromDatabase(guildId) {
+  return withDatabase(async (connection) => {
+    await ensureGuildServersTable(connection);
+    const [rows] = await connection.execute(
+      "SELECT `guild_id`, `alias`, `service_id`, `linked_by`, `linked_at` FROM `nitrado_guild_servers` WHERE `guild_id` = ? ORDER BY `alias` = 'default' DESC, `alias` ASC",
+      [guildId]
+    );
+
+    return rows.map((row) => ({
+      guildId: row.guild_id,
+      alias: row.alias || "default",
+      serviceId: row.service_id,
+      linkedBy: row.linked_by || "",
+      linkedAt: row.linked_at ? new Date(row.linked_at).toISOString() : ""
+    }));
+  });
+}
+
+async function saveGuildServerToDatabase({ guildId, alias = "default", serviceId, token, linkedBy }) {
   const tokenPayload = JSON.stringify(encryptToken(token));
+  const normalizedAlias = normalizeAlias(alias) || "default";
 
   return withDatabase(async (connection) => {
     await ensureGuildServersTable(connection);
     await connection.execute(
-      `INSERT INTO \`nitrado_guild_servers\` (\`guild_id\`, \`service_id\`, \`token_payload\`, \`linked_by\`, \`linked_at\`)
-       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+      `INSERT INTO \`nitrado_guild_servers\` (\`guild_id\`, \`alias\`, \`service_id\`, \`token_payload\`, \`linked_by\`, \`linked_at\`)
+       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
        ON DUPLICATE KEY UPDATE
          \`service_id\` = VALUES(\`service_id\`),
          \`token_payload\` = VALUES(\`token_payload\`),
          \`linked_by\` = VALUES(\`linked_by\`),
          \`linked_at\` = CURRENT_TIMESTAMP`,
-      [guildId, serviceId, tokenPayload, linkedBy || ""]
+      [guildId, normalizedAlias, serviceId, tokenPayload, linkedBy || ""]
     );
   });
 }
 
-async function deleteGuildServerFromDatabase(guildId) {
+async function deleteGuildServerFromDatabase(guildId, alias = "") {
   return withDatabase(async (connection) => {
     await ensureGuildServersTable(connection);
-    const [result] = await connection.execute("DELETE FROM `nitrado_guild_servers` WHERE `guild_id` = ?", [guildId]);
+    const normalizedAlias = normalizeAlias(alias);
+    const [result] = normalizedAlias
+      ? await connection.execute("DELETE FROM `nitrado_guild_servers` WHERE `guild_id` = ? AND `alias` = ?", [guildId, normalizedAlias])
+      : await connection.execute("DELETE FROM `nitrado_guild_servers` WHERE `guild_id` = ?", [guildId]);
     return result.affectedRows > 0;
   });
 }
@@ -199,14 +285,17 @@ async function withDatabase(callback) {
 async function ensureGuildServersTable(connection) {
   await connection.execute(`
     CREATE TABLE IF NOT EXISTS \`nitrado_guild_servers\` (
-      \`guild_id\` VARCHAR(32) PRIMARY KEY,
+      \`guild_id\` VARCHAR(32) NOT NULL,
+      \`alias\` VARCHAR(40) NOT NULL DEFAULT 'default',
       \`service_id\` VARCHAR(64) NOT NULL,
       \`token_payload\` MEDIUMTEXT NOT NULL,
       \`linked_by\` VARCHAR(32) DEFAULT '',
       \`linked_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (\`guild_id\`, \`alias\`)
     )
   `);
+  await ensureGuildServerAliasColumn(connection);
 }
 
 function databaseConfig() {
@@ -239,4 +328,43 @@ function envValue(...names) {
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return "";
+}
+
+function normalizeAlias(alias) {
+  return String(alias || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 40);
+}
+
+function selectJsonGuildServer(guildRecord, alias = "") {
+  if (!guildRecord) return null;
+  const normalizedAlias = normalizeAlias(alias);
+  if (guildRecord.servers) {
+    if (normalizedAlias) return guildRecord.servers[normalizedAlias] || null;
+    const entries = Object.entries(guildRecord.servers);
+    if (!entries.length) return null;
+    if (entries.length > 1) {
+      return { needsAlias: true, choices: entries.map(([entryAlias]) => entryAlias) };
+    }
+    const [entryAlias, record] = entries[0];
+    return { ...record, alias: entryAlias };
+  }
+  return normalizedAlias && normalizedAlias !== "default" ? null : { ...guildRecord, alias: "default" };
+}
+
+async function ensureGuildServerAliasColumn(connection) {
+  const [columns] = await connection.execute("SHOW COLUMNS FROM `nitrado_guild_servers`");
+  const columnNames = new Set(columns.map((column) => column.Field));
+  if (!columnNames.has("alias")) {
+    await connection.execute("ALTER TABLE `nitrado_guild_servers` ADD COLUMN `alias` VARCHAR(40) NOT NULL DEFAULT 'default' AFTER `guild_id`");
+  }
+
+  const [keys] = await connection.execute("SHOW KEYS FROM `nitrado_guild_servers` WHERE `Key_name` = 'PRIMARY'");
+  const primaryColumns = keys.map((key) => key.Column_name);
+  if (primaryColumns.length === 1 && primaryColumns[0] === "guild_id") {
+    await connection.execute("ALTER TABLE `nitrado_guild_servers` DROP PRIMARY KEY, ADD PRIMARY KEY (`guild_id`, `alias`)");
+  }
 }

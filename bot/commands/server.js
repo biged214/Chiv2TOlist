@@ -4,80 +4,90 @@ import { NitradoClient } from "../nitrado/client.js";
 export const serverCommand = new SlashCommandBuilder()
   .setName("server")
   .setDescription("Control the linked Chivalry 2 Nitrado server.")
-  .addSubcommand((subcommand) => subcommand.setName("status").setDescription("Show server status."))
+  .addSubcommand((subcommand) => withServerOption(subcommand.setName("status").setDescription("Show server status.")))
   .addSubcommand((subcommand) =>
-    subcommand
-      .setName("settings")
-      .setDescription("Show editable Nitrado setting keys.")
-      .addIntegerOption((option) =>
-        option
-          .setName("page")
-          .setDescription("Settings page to show.")
-          .setMinValue(1)
-          .setMaxValue(10)
-          .setRequired(false)
+    withServerOption(
+      subcommand
+        .setName("settings")
+        .setDescription("Show editable Nitrado setting keys.")
+        .addIntegerOption((option) =>
+          option
+            .setName("page")
+            .setDescription("Settings page to show.")
+            .setMinValue(1)
+            .setMaxValue(10)
+            .setRequired(false)
+        )
       )
   )
   .addSubcommand((subcommand) =>
-    subcommand
-      .setName("files")
-      .setDescription("List Nitrado file-server entries for troubleshooting.")
-      .addStringOption((option) =>
-        option
-          .setName("path")
-          .setDescription("Directory path to list, such as / or /games.")
-          .setMaxLength(160)
-          .setRequired(false)
+    withServerOption(
+      subcommand
+        .setName("files")
+        .setDescription("List Nitrado file-server entries for troubleshooting.")
+        .addStringOption((option) =>
+          option
+            .setName("path")
+            .setDescription("Directory path to list, such as / or /games.")
+            .setMaxLength(160)
+            .setRequired(false)
+        )
       )
   )
-  .addSubcommand((subcommand) => subcommand.setName("filescan").setDescription("Scan common Nitrado file roots."))
-  .addSubcommand((subcommand) => subcommand.setName("debug").setDescription("Show safe Nitrado service fields for troubleshooting."))
-  .addSubcommand((subcommand) => subcommand.setName("restart").setDescription("Restart the server."))
-  .addSubcommand((subcommand) => subcommand.setName("stop").setDescription("Stop the server."))
+  .addSubcommand((subcommand) => withServerOption(subcommand.setName("filescan").setDescription("Scan common Nitrado file roots.")))
+  .addSubcommand((subcommand) => withServerOption(subcommand.setName("debug").setDescription("Show safe Nitrado service fields for troubleshooting.")))
+  .addSubcommand((subcommand) => withServerOption(subcommand.setName("restart").setDescription("Restart the server.")))
+  .addSubcommand((subcommand) => withServerOption(subcommand.setName("stop").setDescription("Stop the server.")))
   .addSubcommand((subcommand) =>
-    subcommand
-      .setName("rename")
-      .setDescription("Rename the server.")
-      .addStringOption((option) =>
-        option
-          .setName("name")
-          .setDescription("New server name.")
-          .setMinLength(3)
-          .setMaxLength(80)
-          .setRequired(true)
-      )
-  )
-  .addSubcommand((subcommand) =>
-    subcommand
-      .setName("password")
-      .setDescription("Set or remove the server password.")
-      .addStringOption((option) =>
-        option
-          .setName("mode")
-          .setDescription("Whether to set or remove the password.")
-          .setRequired(true)
-          .addChoices({ name: "Set", value: "set" }, { name: "Remove", value: "remove" })
-      )
-      .addStringOption((option) =>
-        option
-          .setName("value")
-          .setDescription("Password to set. Leave empty when removing.")
-          .setMinLength(1)
-          .setMaxLength(64)
-          .setRequired(false)
+    withServerOption(
+      subcommand
+        .setName("rename")
+        .setDescription("Rename the server.")
+        .addStringOption((option) =>
+          option
+            .setName("name")
+            .setDescription("New server name.")
+            .setMinLength(3)
+            .setMaxLength(80)
+            .setRequired(true)
+        )
       )
   )
   .addSubcommand((subcommand) =>
-    subcommand
-      .setName("maxplayers")
-      .setDescription("Change the max player count.")
-      .addIntegerOption((option) =>
-        option
-          .setName("count")
-          .setDescription("Allowed player count.")
-          .setMinValue(2)
-          .setMaxValue(64)
-          .setRequired(true)
+    withServerOption(
+      subcommand
+        .setName("password")
+        .setDescription("Set or remove the server password.")
+        .addStringOption((option) =>
+          option
+            .setName("mode")
+            .setDescription("Whether to set or remove the password.")
+            .setRequired(true)
+            .addChoices({ name: "Set", value: "set" }, { name: "Remove", value: "remove" })
+        )
+        .addStringOption((option) =>
+          option
+            .setName("value")
+            .setDescription("Password to set. Leave empty when removing.")
+            .setMinLength(1)
+            .setMaxLength(64)
+            .setRequired(false)
+        )
+      )
+  )
+  .addSubcommand((subcommand) =>
+    withServerOption(
+      subcommand
+        .setName("maxplayers")
+        .setDescription("Change the max player count.")
+        .addIntegerOption((option) =>
+          option
+            .setName("count")
+            .setDescription("Allowed player count.")
+            .setMinValue(2)
+            .setMaxValue(64)
+            .setRequired(true)
+        )
       )
   )
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
@@ -95,9 +105,15 @@ export async function handleServerCommand(interaction, { getNitradoCredentials, 
   await interaction.deferReply({ ephemeral: true });
 
   try {
-    const credentials = await getNitradoCredentials(interaction.guildId);
+    const serverAlias = interaction.options.getString("server") || "";
+    const credentials = await getNitradoCredentials(interaction.guildId, serverAlias);
+    if (credentials?.needsAlias) {
+      await interaction.editReply(`This Discord server has multiple linked Nitrado servers. Choose one with \`server:\`: ${credentials.choices.map((choice) => `\`${choice}\``).join(", ")}`);
+      return;
+    }
+
     if (!credentials?.token || !credentials?.serviceId) {
-      await interaction.editReply("This Discord server is not linked yet. Ask a server admin to run `/nitrado link`.");
+      await interaction.editReply(serverAlias ? `No linked Nitrado server found for \`${serverAlias}\`.` : "This Discord server is not linked yet. Ask a server admin to run `/nitrado link`.");
       return;
     }
 
@@ -114,6 +130,16 @@ export async function handleServerCommand(interaction, { getNitradoCredentials, 
     console.error(`Discord /server ${subcommand} failed:`, error);
     await interaction.editReply(formatNitradoError(error));
   }
+}
+
+function withServerOption(subcommand) {
+  return subcommand.addStringOption((option) =>
+    option
+      .setName("server")
+      .setDescription("Linked server alias, such as main, duel, or practice.")
+      .setMaxLength(40)
+      .setRequired(false)
+  );
 }
 
 function canControlServer(interaction, allowedRoleIds) {

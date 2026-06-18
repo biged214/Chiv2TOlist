@@ -3,7 +3,7 @@ import { getBotConfig, hasRequiredBotConfig } from "./env.js";
 import { handleServerCommand } from "./commands/server.js";
 import { handleNitradoCommand, handleNitradoLinkModal } from "./commands/nitrado.js";
 import { registerBotCommands } from "./registerCommands.js";
-import { getGuildServer, getGuildServerStorageStatus } from "./storage/guildServers.js";
+import { getGuildServerByAlias, getGuildServerStorageStatus } from "./storage/guildServers.js";
 
 let discordClient;
 const botStatus = {
@@ -56,7 +56,7 @@ export async function startDiscordBot() {
 
   client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isModalSubmit()) {
-      if (interaction.customId === "nitrado_link_modal") {
+      if (interaction.customId === "nitrado_link_modal" || interaction.customId.startsWith("nitrado_link_modal:")) {
         await handleNitradoLinkModal(interaction);
       }
       return;
@@ -66,7 +66,7 @@ export async function startDiscordBot() {
 
     if (interaction.commandName === "server") {
       await handleServerCommand(interaction, {
-        getNitradoCredentials: (guildId) => getNitradoCredentials(guildId, config),
+        getNitradoCredentials: (guildId, alias) => getNitradoCredentials(guildId, config, alias),
         allowedRoleIds: config.allowedRoleIds
       });
       return;
@@ -105,11 +105,13 @@ function setBotStatus(nextStatus) {
   });
 }
 
-async function getNitradoCredentials(guildId, config) {
+async function getNitradoCredentials(guildId, config, alias = "") {
   if (guildId) {
-    const linkedServer = await getGuildServer(guildId);
+    const linkedServer = await getGuildServerByAlias(guildId, alias);
     if (linkedServer) {
+      if (linkedServer.needsAlias) return linkedServer;
       return {
+        alias: linkedServer.alias || alias || "default",
         token: linkedServer.token,
         serviceId: linkedServer.serviceId
       };

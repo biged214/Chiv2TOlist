@@ -110,14 +110,17 @@ async function migrate(connection) {
 
   await connection.execute(`
     CREATE TABLE IF NOT EXISTS \`nitrado_guild_servers\` (
-      \`guild_id\` VARCHAR(32) PRIMARY KEY,
+      \`guild_id\` VARCHAR(32) NOT NULL,
+      \`alias\` VARCHAR(40) NOT NULL DEFAULT 'default',
       \`service_id\` VARCHAR(64) NOT NULL,
       \`token_payload\` MEDIUMTEXT NOT NULL,
       \`linked_by\` VARCHAR(32) DEFAULT '',
       \`linked_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (\`guild_id\`, \`alias\`)
     )
   `);
+  await ensureNitradoGuildServersAlias(connection);
 
   const [regions] = await connection.execute("SELECT COUNT(*) AS count FROM `regions`");
   if (!Number(regions[0]?.count)) {
@@ -136,6 +139,18 @@ async function addMissingColumns(connection, table, columns) {
     if (!columnNames.has(name)) {
       await connection.execute(`ALTER TABLE \`${table}\` ADD COLUMN \`${name}\` ${definition}`);
     }
+  }
+}
+
+async function ensureNitradoGuildServersAlias(connection) {
+  await addMissingColumns(connection, "nitrado_guild_servers", [
+    ["alias", "VARCHAR(40) NOT NULL DEFAULT 'default' AFTER `guild_id`"]
+  ]);
+
+  const [keys] = await connection.execute("SHOW KEYS FROM `nitrado_guild_servers` WHERE `Key_name` = 'PRIMARY'");
+  const primaryColumns = keys.map((key) => key.Column_name);
+  if (primaryColumns.length === 1 && primaryColumns[0] === "guild_id") {
+    await connection.execute("ALTER TABLE `nitrado_guild_servers` DROP PRIMARY KEY, ADD PRIMARY KEY (`guild_id`, `alias`)");
   }
 }
 

@@ -14,7 +14,7 @@ BOT_ENCRYPTION_KEY=long-random-secret-used-to-encrypt-linked-nitrado-tokens
 
 `DISCORD_GUILD_ID` is recommended while testing because guild commands update quickly. For the community version, remove `DISCORD_GUILD_ID` and run registration again so commands become global.
 
-`NITRADO_TOKEN` and `NITRADO_SERVICE_ID` are now optional fallback values. Each Discord server can link its own Nitrado server with `/nitrado link`.
+`NITRADO_TOKEN` and `NITRADO_SERVICE_ID` are now optional fallback values. Each Discord server can link one or more Nitrado servers with `/nitrado link`.
 
 Do not change `BOT_ENCRYPTION_KEY` after users link servers. Existing encrypted Nitrado tokens depend on that key.
 
@@ -37,16 +37,30 @@ The bot registers one slash command:
 /nitrado link
 /nitrado info
 /nitrado unlink
-/server status
-/server restart
-/server stop
-/server rename name:New Name
-/server password mode:Set value:password
-/server password mode:Remove
-/server maxplayers count:8
+/server status server:main
+/server restart server:main
+/server stop server:main
+/server rename name:New Name server:main
+/server password mode:Set value:password server:main
+/server password mode:Remove server:main
+/server maxplayers count:8 server:main
 ```
 
-Server admins should run `/nitrado link` first. It opens a private Discord form for the Nitrado API token and service ID. Then use `/server status` to confirm the link.
+Server admins should run `/nitrado link alias:main` first. It opens a private Discord form for the Nitrado API token and service ID. Then use `/server status server:main` to confirm the link.
+
+Aliases let one Discord server manage multiple Nitrado services. Examples:
+
+```text
+/nitrado link alias:main
+/nitrado link alias:duel
+/nitrado link alias:practice
+/nitrado info
+/server status server:duel
+/server restart server:practice
+/nitrado unlink alias:duel
+```
+
+If only one Nitrado server is linked, `/server status` can be used without the `server` option. Once multiple servers are linked, use the `server` option to choose the alias.
 
 `/nitrado link` requires `BOT_ENCRYPTION_KEY` or `SESSION_SECRET` to be set before it will save tokens.
 
