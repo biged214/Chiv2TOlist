@@ -18,6 +18,18 @@ export const serverCommand = new SlashCommandBuilder()
           .setRequired(false)
       )
   )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("files")
+      .setDescription("List Nitrado file-server entries for troubleshooting.")
+      .addStringOption((option) =>
+        option
+          .setName("path")
+          .setDescription("Directory path to list, such as / or /games.")
+          .setMaxLength(160)
+          .setRequired(false)
+      )
+  )
   .addSubcommand((subcommand) => subcommand.setName("restart").setDescription("Restart the server."))
   .addSubcommand((subcommand) => subcommand.setName("stop").setDescription("Stop the server."))
   .addSubcommand((subcommand) =>
@@ -130,6 +142,12 @@ async function runServerSubcommand(subcommand, interaction, nitradoClient) {
     return formatSettings(settings, interaction.options.getInteger("page") || 1);
   }
 
+  if (subcommand === "files") {
+    const path = interaction.options.getString("path") || "/";
+    const files = await nitradoClient.listFiles(path);
+    return formatFiles(path, files);
+  }
+
   if (subcommand === "restart") return nitradoClient.restartGameserver();
   if (subcommand === "stop") return nitradoClient.stopGameserver();
 
@@ -192,6 +210,21 @@ function formatSettings(settings, page) {
 
   lines.push(`Showing page ${currentPage}/${pageCount}, entries ${start + 1}-${start + selected.length} of ${settings.length}.`);
 
+  return lines.join("\n").slice(0, 1900);
+}
+
+function formatFiles(path, entries) {
+  if (!entries.length) {
+    return `No file-server entries found for ${path}.`;
+  }
+
+  const lines = [`Entries for ${path}:`];
+  for (const entry of entries.slice(0, 35)) {
+    const type = entry.type === "dir" || entry.isDirectory ? "dir" : "file";
+    lines.push(`${type}: ${entry.path || entry.name}`);
+  }
+
+  lines.push(`Showing ${Math.min(entries.length, 35)} of ${entries.length} entries.`);
   return lines.join("\n").slice(0, 1900);
 }
 

@@ -222,6 +222,10 @@ export class NitradoClient {
     );
   }
 
+  async listFiles(directory = "/") {
+    return this.listFileServerDirectory(directory);
+  }
+
   async findConfigFiles() {
     const likelyFiles = [
       "/games/chivalry2/Chivalry/Saved/Config/LinuxServer/Game.ini",
@@ -906,6 +910,9 @@ function isRetryableFileError(error) {
     error?.statusCode === 405 ||
     error?.statusCode === 422 ||
     message.includes("not found") ||
+    message.includes("could not download") ||
+    message.includes("could not list") ||
+    message.includes("http 404") ||
     message.includes("invalid") ||
     message.includes("unknown") ||
     message.includes("file") ||
