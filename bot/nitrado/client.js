@@ -82,19 +82,19 @@ export class NitradoClient {
 
   async setGameserverPassword(password) {
     return this.updateFirstSetting(
-      ["ServerPassword", "server_password", "password", "join_password", "Password", "server-password"],
+      ["ServerPassword"],
       password,
       "set password",
-      (key) => normalizeKey(key).includes("password")
+      (key) => normalizeKey(key) === "serverpassword"
     );
   }
 
   async removeGameserverPassword() {
     return this.updateFirstSetting(
-      ["ServerPassword", "server_password", "password", "join_password", "Password", "server-password"],
+      ["ServerPassword"],
       "",
       "remove password",
-      (key) => normalizeKey(key).includes("password")
+      (key) => normalizeKey(key) === "serverpassword"
     );
   }
 
@@ -178,13 +178,15 @@ export class NitradoClient {
 
   async updateGameserverSetting(target, value, actionLabel) {
     const key = typeof target === "string" ? target : target.key;
+    const discoveredCategory = typeof target === "object" ? categoryFromPath(target.path) : "";
     const categories = [
-      typeof target === "object" ? categoryFromPath(target.path) : "",
+      discoveredCategory,
       "config",
       "settings",
       "general",
       ""
-    ].filter((category, index, values) => values.indexOf(category) === index);
+    ].filter((category, index, values) => category && values.indexOf(category) === index);
+    categories.push("");
 
     const payloads = [
       { option: key, value },
@@ -407,6 +409,7 @@ function isRetryableSettingError(error) {
     error?.statusCode === 405 ||
     error?.statusCode === 422 ||
     message.includes("not found") ||
+    message.includes("no category given") ||
     message.includes("invalid") ||
     message.includes("unknown")
   );
