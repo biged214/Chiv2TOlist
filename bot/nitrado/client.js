@@ -237,12 +237,20 @@ export class NitradoClient {
   }
 
   async updateGamePropertyOrConfigFile(key, value, actionLabel) {
+    const propertyErrors = [];
+
     try {
       return await this.updateGameProperty(key, value, actionLabel);
     } catch (error) {
+      propertyErrors.push(error.message || "Unknown error");
       if (!isRetryablePropertyError(error)) throw error;
+    }
+
+    try {
+      return await this.updateGameConfigFileSetting(key, value, actionLabel);
+    } catch (error) {
       throw new NitradoError(
-        `Could not update ${key} through Nitrado game properties. ${error.message || "Unknown error"} File fallback is paused to avoid Nitrado rate limits until we find the real config path with /server filescan.`
+        `Could not update ${key} through Nitrado game properties or config files. Properties error: ${propertyErrors.join("; ")}. File error: ${error.message || "Unknown error"}`
       );
     }
   }
@@ -280,7 +288,7 @@ export class NitradoClient {
 
   async scanFileRoots() {
     const hints = await this.fileRootHints();
-    const paths = [
+    const queue = [
       "/",
       "/games",
       "/gameserver",
@@ -292,9 +300,14 @@ export class NitradoClient {
       "/home",
       ...hints
     ];
-
     const results = [];
-    for (const path of [...new Set(paths.filter(Boolean))]) {
+    const seen = new Set();
+
+    while (queue.length && results.length < 45) {
+      const path = normalizeNitradoInputPath(queue.shift());
+      if (!path || seen.has(path)) continue;
+      seen.add(path);
+
       try {
         const result = await this.listFiles(path);
         results.push({
@@ -303,6 +316,12 @@ export class NitradoClient {
           sample: result.entries.slice(0, 5).map((entry) => entry.path || entry.name).filter(Boolean),
           rawKeys: result.rawKeys || []
         });
+
+        for (const entry of result.entries) {
+          if ((entry.type === "dir" || entry.isDirectory) && (entry.path || entry.name)) {
+            queue.push(entry.path || `${path.replace(/\/$/, "")}/${entry.name}`);
+          }
+        }
       } catch (error) {
         results.push({
           path,
@@ -334,12 +353,19 @@ export class NitradoClient {
     }
 
     if (username) {
-      hints.push(`/${username}`, `/home/${username}`, `/games/${username}`, `/server/${username}`);
+      hints.push(
+        `/${username}`,
+        `/home/${username}`,
+        `/games/${username}`,
+        `/games/${username}/ftproot`,
+        `/server/${username}`
+      );
       for (const folder of folders) {
         hints.push(
           `/${username}/${folder}`,
           `/home/${username}/${folder}`,
           `/games/${username}/${folder}`,
+          `/games/${username}/ftproot/${folder}`,
           `/server/${username}/${folder}`
         );
       }
@@ -349,7 +375,19 @@ export class NitradoClient {
   }
 
   async findConfigFiles() {
+    const roots = await this.fileRootHints().catch(() => []);
+    const rootFiles = [];
+    for (const root of roots) {
+      rootFiles.push(
+        `${root}/Chivalry/Saved/Config/LinuxServer/Game.ini`,
+        `${root}/Chivalry/Saved/Config/WindowsServer/Game.ini`,
+        `${root}/Chivalry/Saved/Config/LinuxServer/Engine.ini`,
+        `${root}/Chivalry/Saved/Config/WindowsServer/Engine.ini`
+      );
+    }
+
     const likelyFiles = [
+      ...rootFiles,
       "/games/chivalry2/Chivalry/Saved/Config/LinuxServer/Game.ini",
       "/games/chivalry2/Chivalry/Saved/Config/WindowsServer/Game.ini",
       "/games/Chivalry2/Chivalry/Saved/Config/LinuxServer/Game.ini",
@@ -365,7 +403,7 @@ export class NitradoClient {
   }
 
   async discoverConfigFiles() {
-    const queue = ["/", "/games", "/games/chivalry2", "/games/Chivalry2"];
+    const queue = ["/", "/games", "/games/chivalry2", "/games/Chivalry2", ...(await this.fileRootHints().catch(() => []))];
     const seen = new Set();
     const files = [];
 
