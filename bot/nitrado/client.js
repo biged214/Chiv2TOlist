@@ -201,7 +201,7 @@ export class NitradoClient {
       { [key]: value }
     ];
 
-    const methods = ["POST", "PUT", "PATCH"];
+    const methods = ["PUT", "POST", "PATCH"];
     const errors = [];
 
     for (const method of methods) {
@@ -228,7 +228,7 @@ export class NitradoClient {
                 ok: true,
                 message:
                   data?.message ||
-                  `Nitrado accepted ${actionLabel} for ${key}${category ? ` in ${category}` : ""}. Restart the server if the change does not apply immediately.`
+                  `Nitrado accepted ${actionLabel} for ${key}${category ? ` in ${category}` : ""} via ${method} ${attempt.label}. Restart the server if the change does not apply immediately.`
               };
             } catch (error) {
               errors.push(`${method} ${attempt.label} -> ${error.message || "Unknown error"}`);
@@ -390,20 +390,6 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
     ? `category=${encodedCategory}&key=${encodedKey}`
     : "";
 
-  attempts.push({
-    label: `json ${JSON.stringify(body)}`,
-    path: `/services/${serviceId}/gameservers/settings`,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
-  });
-
-  attempts.push({
-    label: `form ${JSON.stringify(body)}`,
-    path: `/services/${serviceId}/gameservers/settings`,
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams(flattenPayload(body)).toString()
-  });
-
   if (category) {
     attempts.push({
       label: `query ${query}`,
@@ -417,7 +403,27 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ value: String(value ?? "") }).toString()
     });
+    attempts.push({
+      label: `form category/key/value ${category}/${key}`,
+      path: `/services/${serviceId}/gameservers/settings`,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ category, key, value: String(value ?? "") }).toString()
+    });
   }
+
+  attempts.push({
+    label: `form ${JSON.stringify(body)}`,
+    path: `/services/${serviceId}/gameservers/settings`,
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(flattenPayload(body)).toString()
+  });
+
+  attempts.push({
+    label: `json ${JSON.stringify(body)}`,
+    path: `/services/${serviceId}/gameservers/settings`,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
 
   return attempts;
 }
