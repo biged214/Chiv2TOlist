@@ -397,6 +397,7 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
   const attempts = [];
   const encodedCategory = encodeURIComponent(category);
   const encodedKey = encodeURIComponent(key);
+  const isPasswordSetting = normalizeKey(key) === "serverpassword";
 
   if (category) {
     attempts.push({
@@ -429,12 +430,14 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ value: String(value ?? "") }).toString()
     });
-    attempts.push({
-      label: `form category/key/value ${category}/${key}`,
-      path: `/services/${serviceId}/gameservers/settings`,
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ category, key, value: String(value ?? "") }).toString()
-    });
+    if (!isPasswordSetting) {
+      attempts.push({
+        label: `form category/key/value ${category}/${key}`,
+        path: `/services/${serviceId}/gameservers/settings`,
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ category, key, value: String(value ?? "") }).toString()
+      });
+    }
     attempts.push({
       label: `form category nested settings ${category}/${key}`,
       path: `/services/${serviceId}/gameservers/settings`,
@@ -455,19 +458,21 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
     });
   }
 
-  attempts.push({
-    label: `form ${JSON.stringify(body)}`,
-    path: `/services/${serviceId}/gameservers/settings`,
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams(flattenPayload(body)).toString()
-  });
+  if (!isPasswordSetting) {
+    attempts.push({
+      label: `form ${JSON.stringify(body)}`,
+      path: `/services/${serviceId}/gameservers/settings`,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(flattenPayload(body)).toString()
+    });
 
-  attempts.push({
-    label: `json ${JSON.stringify(body)}`,
-    path: `/services/${serviceId}/gameservers/settings`,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
-  });
+    attempts.push({
+      label: `json ${JSON.stringify(body)}`,
+      path: `/services/${serviceId}/gameservers/settings`,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+  }
 
   return attempts;
 }
