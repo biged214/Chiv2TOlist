@@ -901,13 +901,37 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
   const encodedCategory = encodeURIComponent(category);
   const encodedKey = encodeURIComponent(key);
   const isPasswordSetting = normalizeKey(key) === "serverpassword";
+  const stringValue = String(value ?? "");
 
   if (category) {
+    if (isPasswordSetting) {
+      return [
+        {
+          label: `official path value ${category}/${key}`,
+          path: `/services/${serviceId}/gameservers/settings/${encodedCategory}/${encodedKey}`,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ value: stringValue }).toString()
+        },
+        {
+          label: `official path direct ${category}/${key}`,
+          path: `/services/${serviceId}/gameservers/settings/${encodedCategory}/${encodedKey}`,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ [key]: stringValue }).toString()
+        },
+        {
+          label: `category path direct ${category}/${key}`,
+          path: `/services/${serviceId}/gameservers/settings/${encodedCategory}`,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ [key]: stringValue }).toString()
+        }
+      ];
+    }
+
     attempts.push({
       label: `category path nested settings ${category}/${key}`,
       path: `/services/${serviceId}/gameservers/settings/${encodedCategory}`,
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ [`settings[${key}]`]: String(value ?? "") }).toString()
+      body: new URLSearchParams({ [`settings[${key}]`]: stringValue }).toString()
     });
     attempts.push({
       label: `category path json settings ${category}/${key}`,
@@ -919,45 +943,45 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
       label: `category path key/value ${category}/${key}`,
       path: `/services/${serviceId}/gameservers/settings/${encodedCategory}`,
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ key, value: String(value ?? "") }).toString()
+      body: new URLSearchParams({ key, value: stringValue }).toString()
     });
     attempts.push({
       label: `multipart category path key/value ${category}/${key}`,
       path: `/services/${serviceId}/gameservers/settings/${encodedCategory}`,
       headers: {},
-      body: formData({ key, value: String(value ?? "") })
+      body: formData({ key, value: stringValue })
     });
     attempts.push({
       label: `category path direct ${category}/${key}`,
       path: `/services/${serviceId}/gameservers/settings/${encodedCategory}`,
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ [key]: String(value ?? "") }).toString()
+      body: new URLSearchParams({ [key]: stringValue }).toString()
     });
     attempts.push({
       label: `path ${category}/${key}`,
       path: `/services/${serviceId}/gameservers/settings/${encodedCategory}/${encodedKey}`,
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ value: String(value ?? "") }).toString()
+      body: new URLSearchParams({ value: stringValue }).toString()
     });
     if (!isPasswordSetting) {
       attempts.push({
         label: `form category/key/value ${category}/${key}`,
         path: `/services/${serviceId}/gameservers/settings`,
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ category, key, value: String(value ?? "") }).toString()
+        body: new URLSearchParams({ category, key, value: stringValue }).toString()
       });
     }
     attempts.push({
       label: `multipart category/key/value ${category}/${key}`,
       path: `/services/${serviceId}/gameservers/settings`,
       headers: {},
-      body: formData({ category, key, value: String(value ?? "") })
+      body: formData({ category, key, value: stringValue })
     });
     attempts.push({
       label: `form category nested settings ${category}/${key}`,
       path: `/services/${serviceId}/gameservers/settings`,
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ category, [`settings[${key}]`]: String(value ?? "") }).toString()
+      body: new URLSearchParams({ category, [`settings[${key}]`]: stringValue }).toString()
     });
     attempts.push({
       label: `json category settings ${category}/${key}`,
@@ -969,7 +993,7 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
       label: `query category direct ${category}/${key}`,
       path: `/services/${serviceId}/gameservers/settings?category=${encodedCategory}`,
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ [key]: String(value ?? "") }).toString()
+      body: new URLSearchParams({ [key]: stringValue }).toString()
     });
   }
 

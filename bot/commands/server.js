@@ -348,6 +348,10 @@ function formatNitradoError(error) {
     return "Nitrado request failed: Not Found. This action may not be available for this Chivalry 2 service state.";
   }
 
+  if (message.toLowerCase().includes("http 429") || message.toLowerCase().includes("rate limit")) {
+    return "Nitrado rate limited the bot. Wait 5-10 minutes, keep the server stopped, then try the command once more.";
+  }
+
   if (message.toLowerCase().includes("public settings endpoint")) {
     return [
       "Nitrado did not apply the ServerPassword setting through the public settings endpoint.",
