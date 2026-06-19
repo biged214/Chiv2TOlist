@@ -62,6 +62,17 @@ Aliases let one Discord server manage multiple Nitrado services. Examples:
 
 If only one Nitrado server is linked, `/server status` can be used without the `server` option. Once multiple servers are linked, use the `server` option to choose the alias.
 
+Nitrado requires the game server to be offline before settings changes are applied. For rename, password, and max-player changes, use this flow:
+
+```text
+/server stop server:main
+/server status server:main
+/server password mode:Set value:password server:main
+/server restart server:main
+```
+
+Wait for `/server status` to show stopped/offline before running the setting command.
+
 `/nitrado link` requires `BOT_ENCRYPTION_KEY` or `SESSION_SECRET` to be set before it will save tokens.
 
 The command appears only in the Discord server whose ID is set as `DISCORD_GUILD_ID`. It will not appear in DMs or in other Discord servers while guild-scoped testing is enabled.

@@ -95,11 +95,23 @@ export class NitradoClient {
   }
 
   async setGameserverPassword(password) {
-    return this.updateGamePropertyOrConfigFile("ServerPassword", password, "set password");
+    return this.updateFirstSetting(
+      ["ServerPassword"],
+      password,
+      "set password",
+      (key) => normalizeKey(key) === "serverpassword",
+      ["category:config"]
+    );
   }
 
   async removeGameserverPassword() {
-    return this.updateGamePropertyOrConfigFile("ServerPassword", "", "remove password");
+    return this.updateFirstSetting(
+      ["ServerPassword"],
+      "",
+      "remove password",
+      (key) => normalizeKey(key) === "serverpassword",
+      ["category:config"]
+    );
   }
 
   async setGameserverMaxPlayers(maxPlayers) {
@@ -610,6 +622,7 @@ export class NitradoClient {
 
   async updateFirstSetting(keys, value, actionLabel, isAllowedKey = () => true, relatedCategoryKeys = []) {
     const errors = [];
+    await this.ensureSettingsCanBeUpdated(actionLabel);
     const discoveredSettings = await this.safeGetSettings();
     const discoveredKeys = settingCandidates(discoveredSettings, keys);
     const relatedCategories = settingCandidates(discoveredSettings, relatedCategoryKeys)
@@ -647,6 +660,15 @@ export class NitradoClient {
       return await this.getGameserverSettings();
     } catch {
       return [];
+    }
+  }
+
+  async ensureSettingsCanBeUpdated(actionLabel) {
+    const server = await this.getGameserver();
+    if (!isOfflineStatus(server.status)) {
+      throw new NitradoError(
+        `Nitrado requires the server to be offline before ${actionLabel} settings can be changed. Current status: ${server.status}. Run /server stop, wait until /server status shows stopped/offline, then run this command again. After it succeeds, run /server restart.`
+      );
     }
   }
 
@@ -695,7 +717,7 @@ export class NitradoClient {
                 ok: true,
                 message:
                   data?.message ||
-                  `Nitrado accepted ${actionLabel} for ${key}${category ? ` in ${category}` : ""} via ${method} ${attempt.label}. Restart the server if the change does not apply immediately.`
+                  `Nitrado accepted ${actionLabel} for ${key}${category ? ` in ${category}` : ""} via ${method} ${attempt.label}. Run /server restart for the change to apply.`
               };
             } catch (error) {
               errors.push(`${method} ${attempt.label} -> ${error.message || "Unknown error"}`);
@@ -892,14 +914,12 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ value: String(value ?? "") }).toString()
     });
-    if (!isPasswordSetting) {
-      attempts.push({
-        label: `form category/key/value ${category}/${key}`,
-        path: `/services/${serviceId}/gameservers/settings`,
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ category, key, value: String(value ?? "") }).toString()
-      });
-    }
+    attempts.push({
+      label: `form category/key/value ${category}/${key}`,
+      path: `/services/${serviceId}/gameservers/settings`,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ category, key, value: String(value ?? "") }).toString()
+    });
     attempts.push({
       label: `multipart category/key/value ${category}/${key}`,
       path: `/services/${serviceId}/gameservers/settings`,
@@ -1206,6 +1226,11 @@ function firstNumber(...values) {
 
 function isNotFound(error) {
   return error?.statusCode === 404 || String(error?.message || "").toLowerCase() === "not found";
+}
+
+function isOfflineStatus(status) {
+  const normalized = String(status || "").toLowerCase();
+  return ["stopped", "stop", "offline", "suspended"].includes(normalized);
 }
 
 function isRetryableSettingError(error) {
