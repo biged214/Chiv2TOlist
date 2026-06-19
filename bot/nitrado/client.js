@@ -101,7 +101,7 @@ export class NitradoClient {
       "set password",
       (key) => normalizeKey(key) === "serverpassword",
       ["category:config"],
-      { verify: true }
+      { verify: true, categories: ["config"] }
     );
   }
 
@@ -112,7 +112,7 @@ export class NitradoClient {
       "remove password",
       (key) => normalizeKey(key) === "serverpassword",
       ["category:config"],
-      { verify: true }
+      { verify: true, categories: ["config"] }
     );
   }
 
@@ -644,8 +644,11 @@ export class NitradoClient {
         }
       }
     }
+    const targets = options.categories?.length
+      ? keysToTry.filter((target) => options.categories.includes(categoryFromPath(target.path)))
+      : keysToTry;
 
-    for (const target of keysToTry) {
+    for (const target of targets) {
       try {
         return await this.updateGameserverSetting(target, value, actionLabel, options);
       } catch (error) {
@@ -677,14 +680,16 @@ export class NitradoClient {
   async updateGameserverSetting(target, value, actionLabel, options = {}) {
     const key = typeof target === "string" ? target : target.key;
     const discoveredCategory = typeof target === "object" ? categoryFromPath(target.path) : "";
-    const categories = [
-      discoveredCategory,
-      "config",
-      "settings",
-      "general",
-      ""
-    ].filter((category, index, values) => category && values.indexOf(category) === index);
-    categories.push("");
+    const categories = options.categories?.length
+      ? [...new Set(options.categories.filter(Boolean))]
+      : [
+          discoveredCategory,
+          "config",
+          "settings",
+          "general",
+          ""
+        ].filter((category, index, values) => category && values.indexOf(category) === index);
+    if (!options.categories?.length) categories.push("");
 
     const payloads = [
       { option: key, value },
