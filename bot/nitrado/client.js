@@ -101,7 +101,7 @@ export class NitradoClient {
       "set password",
       (key) => normalizeKey(key) === "serverpassword",
       ["category:config"],
-      { verify: true, categories: ["config"] }
+      { verify: true, verifyDelayMs: 2000, categories: ["config"], methods: ["POST"] }
     );
   }
 
@@ -112,7 +112,7 @@ export class NitradoClient {
       "remove password",
       (key) => normalizeKey(key) === "serverpassword",
       ["category:config"],
-      { verify: true, categories: ["config"] }
+      { verify: true, verifyDelayMs: 2000, categories: ["config"], methods: ["POST"] }
     );
   }
 
@@ -697,7 +697,7 @@ export class NitradoClient {
       { [key]: value }
     ];
 
-    const methods = ["PUT", "POST", "PATCH"];
+    const methods = options.methods?.length ? options.methods : ["PUT", "POST", "PATCH"];
     const errors = [];
 
     for (const method of methods) {
@@ -720,6 +720,7 @@ export class NitradoClient {
               });
 
               if (options.verify) {
+                if (options.verifyDelayMs) await sleep(options.verifyDelayMs);
                 await this.verifyGameserverSetting(key, value, `${method} ${attempt.label}`);
               }
 
@@ -911,6 +912,24 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
   if (category) {
     if (isPasswordSetting) {
       return [
+        {
+          label: `flat form category/key/value ${category}/${key}`,
+          path: `/services/${serviceId}/gameservers/settings`,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ category, key, value: stringValue }).toString()
+        },
+        {
+          label: `flat json category/key/value ${category}/${key}`,
+          path: `/services/${serviceId}/gameservers/settings`,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ category, key, value: stringValue })
+        },
+        {
+          label: `flat form category/option/value ${category}/${key}`,
+          path: `/services/${serviceId}/gameservers/settings`,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ category, option: key, value: stringValue }).toString()
+        },
         {
           label: `official path value ${category}/${key}`,
           path: `/services/${serviceId}/gameservers/settings/${encodedCategory}/${encodedKey}`,
@@ -1278,6 +1297,10 @@ function firstNumber(...values) {
     if (Number.isFinite(number)) return number;
   }
   return undefined;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function isNotFound(error) {
