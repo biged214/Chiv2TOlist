@@ -100,7 +100,8 @@ export class NitradoClient {
       password,
       "set password",
       (key) => normalizeKey(key) === "serverpassword",
-      ["category:config"]
+      ["category:config"],
+      { verify: true }
     );
   }
 
@@ -110,7 +111,8 @@ export class NitradoClient {
       "",
       "remove password",
       (key) => normalizeKey(key) === "serverpassword",
-      ["category:config"]
+      ["category:config"],
+      { verify: true }
     );
   }
 
@@ -620,7 +622,7 @@ export class NitradoClient {
     throw new NitradoError(`Could not upload ${filePath}. Last errors: ${errors.slice(-3).join("; ")}`);
   }
 
-  async updateFirstSetting(keys, value, actionLabel, isAllowedKey = () => true, relatedCategoryKeys = []) {
+  async updateFirstSetting(keys, value, actionLabel, isAllowedKey = () => true, relatedCategoryKeys = [], options = {}) {
     const errors = [];
     await this.ensureSettingsCanBeUpdated(actionLabel);
     const discoveredSettings = await this.safeGetSettings();
@@ -645,7 +647,7 @@ export class NitradoClient {
 
     for (const target of keysToTry) {
       try {
-        return await this.updateGameserverSetting(target, value, actionLabel);
+        return await this.updateGameserverSetting(target, value, actionLabel, options);
       } catch (error) {
         errors.push(`${target.key}: ${error.message || "Unknown error"}`);
         if (!isRetryableSettingError(error)) throw error;
@@ -672,7 +674,7 @@ export class NitradoClient {
     }
   }
 
-  async updateGameserverSetting(target, value, actionLabel) {
+  async updateGameserverSetting(target, value, actionLabel, options = {}) {
     const key = typeof target === "string" ? target : target.key;
     const discoveredCategory = typeof target === "object" ? categoryFromPath(target.path) : "";
     const categories = [
@@ -712,6 +714,10 @@ export class NitradoClient {
                 body: attempt.body
               });
 
+              if (options.verify) {
+                await this.verifyGameserverSetting(key, value, `${method} ${attempt.label}`);
+              }
+
               return {
                 action: actionLabel,
                 ok: true,
@@ -729,6 +735,21 @@ export class NitradoClient {
     }
 
     throw new NitradoError(`Nitrado rejected ${actionLabel}. Tried setting key "${key}". Last errors: ${errors.slice(-3).join("; ")}`);
+  }
+
+  async verifyGameserverSetting(key, value, attemptLabel) {
+    const settings = await this.getGameserverSettings();
+    const expected = String(value ?? "");
+    const matches = settings.filter((setting) => normalizeKey(setting.key) === normalizeKey(key));
+    if (!matches.length) {
+      throw new NitradoError(`${key} was accepted via ${attemptLabel}, but ReadSettings did not return ${key} for verification.`);
+    }
+
+    const verified = matches.some((setting) => String(setting.value ?? "") === expected);
+    if (!verified) {
+      const current = matches.map((setting) => maskSettingForError(setting.value)).join(", ");
+      throw new NitradoError(`${key} was accepted via ${attemptLabel}, but ReadSettings still shows ${current || "[empty]"}.`);
+    }
   }
 }
 
@@ -813,6 +834,10 @@ function settingValue(value) {
   if ("current" in value) return value.current;
   if ("default" in value) return value.default;
   return "";
+}
+
+function maskSettingForError(value) {
+  return value ? "[set]" : "[empty]";
 }
 
 function settingCandidates(settings, preferredKeys) {
@@ -914,12 +939,14 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ value: String(value ?? "") }).toString()
     });
-    attempts.push({
-      label: `form category/key/value ${category}/${key}`,
-      path: `/services/${serviceId}/gameservers/settings`,
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ category, key, value: String(value ?? "") }).toString()
-    });
+    if (!isPasswordSetting) {
+      attempts.push({
+        label: `form category/key/value ${category}/${key}`,
+        path: `/services/${serviceId}/gameservers/settings`,
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ category, key, value: String(value ?? "") }).toString()
+      });
+    }
     attempts.push({
       label: `multipart category/key/value ${category}/${key}`,
       path: `/services/${serviceId}/gameservers/settings`,
@@ -1243,6 +1270,8 @@ function isRetryableSettingError(error) {
     message.includes("not found") ||
     message.includes("no category given") ||
     message.includes("no key given") ||
+    message.includes("accepted via") ||
+    message.includes("readsettings") ||
     message.includes("invalid") ||
     message.includes("unknown")
   );
