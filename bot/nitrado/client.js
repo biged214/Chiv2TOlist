@@ -101,7 +101,7 @@ export class NitradoClient {
       "set password",
       (key) => normalizeKey(key) === "serverpassword",
       ["category:config"],
-      { verify: true, verifyDelayMs: 2000, categories: ["config"], methods: ["POST"] }
+      { verify: true, verifyDelayMs: 2000, categories: ["config"] }
     );
   }
 
@@ -112,7 +112,7 @@ export class NitradoClient {
       "remove password",
       (key) => normalizeKey(key) === "serverpassword",
       ["category:config"],
-      { verify: true, verifyDelayMs: 2000, categories: ["config"], methods: ["POST"] }
+      { verify: true, verifyDelayMs: 2000, categories: ["config"] }
     );
   }
 
@@ -740,7 +740,10 @@ export class NitradoClient {
       }
     }
 
-    throw new NitradoError(`Nitrado rejected ${actionLabel}. Tried setting key "${key}". Last errors: ${errors.slice(-3).join("; ")}`);
+    const isPasswordSetting = normalizeKey(key) === "serverpassword";
+    throw new NitradoError(
+      `Nitrado rejected ${actionLabel}. Tried setting key "${key}". ${isPasswordSetting ? "Errors" : "Last errors"}: ${(isPasswordSetting ? errors : errors.slice(-3)).join("; ")}`
+    );
   }
 
   async verifyGameserverSetting(key, value, attemptLabel) {
@@ -929,24 +932,6 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
           path: `/services/${serviceId}/gameservers/settings`,
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams({ category, option: key, value: stringValue }).toString()
-        },
-        {
-          label: `official path value ${category}/${key}`,
-          path: `/services/${serviceId}/gameservers/settings/${encodedCategory}/${encodedKey}`,
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ value: stringValue }).toString()
-        },
-        {
-          label: `official path direct ${category}/${key}`,
-          path: `/services/${serviceId}/gameservers/settings/${encodedCategory}/${encodedKey}`,
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ [key]: stringValue }).toString()
-        },
-        {
-          label: `category path direct ${category}/${key}`,
-          path: `/services/${serviceId}/gameservers/settings/${encodedCategory}`,
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ [key]: stringValue }).toString()
         }
       ];
     }
