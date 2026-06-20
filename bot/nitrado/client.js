@@ -1,5 +1,5 @@
 const defaultBaseUrl = "https://api.nitrado.net";
-const defaultRequestTimeoutMs = 12000;
+const defaultRequestTimeoutMs = 6000;
 
 export class NitradoError extends Error {
   constructor(message, { statusCode, details } = {}) {
@@ -102,7 +102,7 @@ export class NitradoClient {
       "set password",
       (key) => normalizeKey(key) === "serverpassword",
       ["category:config"],
-      { verify: true, verifyDelayMs: 2000, categories: ["config"], methods: ["POST"] }
+      { verify: true, verifyDelayMs: 1000, categories: ["config"], methods: ["POST"] }
     );
   }
 
@@ -113,7 +113,7 @@ export class NitradoClient {
       "remove password",
       (key) => normalizeKey(key) === "serverpassword",
       ["category:config"],
-      { verify: true, verifyDelayMs: 2000, categories: ["config"], methods: ["POST"] }
+      { verify: true, verifyDelayMs: 1000, categories: ["config"], methods: ["POST"] }
     );
   }
 
@@ -941,18 +941,6 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
           path: `/services/${serviceId}/gameservers/settings`,
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams({ category, key, value: stringValue }).toString()
-        },
-        {
-          label: `flat json category/key/value ${category}/${key}`,
-          path: `/services/${serviceId}/gameservers/settings`,
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ category, key, value: stringValue })
-        },
-        {
-          label: `flat form category/option/value ${category}/${key}`,
-          path: `/services/${serviceId}/gameservers/settings`,
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ category, option: key, value: stringValue }).toString()
         }
       ];
     }

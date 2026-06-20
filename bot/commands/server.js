@@ -1,6 +1,8 @@
 import { PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
 import { NitradoClient } from "../nitrado/client.js";
 
+const commandTimeoutMs = 20000;
+
 export const serverCommand = new SlashCommandBuilder()
   .setName("server")
   .setDescription("Control the linked Chivalry 2 Nitrado server.")
@@ -118,7 +120,7 @@ export async function handleServerCommand(interaction, { getNitradoCredentials, 
     }
 
     const nitradoClient = new NitradoClient(credentials);
-    const result = await runServerSubcommand(subcommand, interaction, nitradoClient);
+    const result = await withCommandTimeout(runServerSubcommand(subcommand, interaction, nitradoClient));
 
     if (typeof result === "string") {
       await interaction.editReply(result);
@@ -130,6 +132,15 @@ export async function handleServerCommand(interaction, { getNitradoCredentials, 
     console.error(`Discord /server ${subcommand} failed:`, error);
     await interaction.editReply(formatNitradoError(error));
   }
+}
+
+function withCommandTimeout(promise) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Nitrado command timed out before Discord could receive a result.")), commandTimeoutMs)
+    )
+  ]);
 }
 
 function withServerOption(subcommand) {
