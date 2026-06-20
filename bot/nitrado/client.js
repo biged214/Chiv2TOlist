@@ -1,4 +1,5 @@
 const defaultBaseUrl = "https://api.nitrado.net";
+const defaultRequestTimeoutMs = 12000;
 
 export class NitradoError extends Error {
   constructor(message, { statusCode, details } = {}) {
@@ -101,7 +102,7 @@ export class NitradoClient {
       "set password",
       (key) => normalizeKey(key) === "serverpassword",
       ["category:config"],
-      { verify: true, verifyDelayMs: 2000, categories: ["config"] }
+      { verify: true, verifyDelayMs: 2000, categories: ["config"], methods: ["POST"] }
     );
   }
 
@@ -112,7 +113,7 @@ export class NitradoClient {
       "remove password",
       (key) => normalizeKey(key) === "serverpassword",
       ["category:config"],
-      { verify: true, verifyDelayMs: 2000, categories: ["config"] }
+      { verify: true, verifyDelayMs: 2000, categories: ["config"], methods: ["POST"] }
     );
   }
 
@@ -156,7 +157,7 @@ export class NitradoClient {
       if (headers[key] === undefined) delete headers[key];
     }
 
-    const response = await fetch(`${this.baseUrl}${path}`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}${path}`, {
       ...options,
       headers
     });
@@ -190,7 +191,7 @@ export class NitradoClient {
       ...(options.body instanceof FormData ? options.headers || {} : {})
     };
 
-    const response = await fetch(`${this.baseUrl}${path}`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}${path}`, {
       ...options,
       headers
     });
@@ -550,7 +551,7 @@ export class NitradoClient {
   }
 
   async downloadExternalFile(url) {
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       headers: {
         Authorization: `Bearer ${this.token}`,
         Accept: "text/plain,*/*"
@@ -768,6 +769,26 @@ function parseJson(text) {
     return JSON.parse(text);
   } catch {
     return { raw: text };
+  }
+}
+
+async function fetchWithTimeout(url, options = {}) {
+  const timeoutMs = Number(options.timeoutMs || defaultRequestTimeoutMs);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: options.signal || controller.signal
+    });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new NitradoError(`Nitrado request timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

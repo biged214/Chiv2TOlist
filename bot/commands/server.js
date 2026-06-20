@@ -352,6 +352,10 @@ function formatNitradoError(error) {
     return "Nitrado rate limited the bot. Wait 5-10 minutes, keep the server stopped, then try the command once more.";
   }
 
+  if (message.toLowerCase().includes("timed out")) {
+    return "Nitrado did not respond in time. Wait a minute, confirm the server is stopped, then try once more.";
+  }
+
   if (message.toLowerCase().includes("public settings endpoint")) {
     return [
       "Nitrado did not apply the ServerPassword setting through the public settings endpoint.",
