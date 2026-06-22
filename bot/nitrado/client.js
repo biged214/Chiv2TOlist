@@ -102,7 +102,14 @@ export class NitradoClient {
       "set password",
       (key) => normalizeKey(key) === "serverpassword",
       ["category:config"],
-      { verify: true, verifyDelayMs: 1000, categories: ["config"], methods: ["POST"] }
+      {
+        verify: true,
+        verifyDelayMs: 1000,
+        categories: ["config"],
+        methods: ["POST"],
+        singlePayload: true,
+        allowMissingVerification: true
+      }
     );
   }
 
@@ -113,7 +120,14 @@ export class NitradoClient {
       "remove password",
       (key) => normalizeKey(key) === "serverpassword",
       ["category:config"],
-      { verify: true, verifyDelayMs: 1000, categories: ["config"], methods: ["POST"] }
+      {
+        verify: true,
+        verifyDelayMs: 1000,
+        categories: ["config"],
+        methods: ["POST"],
+        singlePayload: true,
+        allowMissingVerification: true
+      }
     );
   }
 
@@ -703,13 +717,15 @@ export class NitradoClient {
 
     for (const method of methods) {
       for (const category of categories) {
-        const categorizedPayloads = category
-          ? [
-              { category, key, value, option: key },
-              { category, key, value },
-              ...payloads
-            ]
-          : payloads;
+        const categorizedPayloads = options.singlePayload
+          ? [{}]
+          : category
+            ? [
+                { category, key, value, option: key },
+                { category, key, value },
+                ...payloads
+              ]
+            : payloads;
 
         for (const body of categorizedPayloads) {
           for (const attempt of settingUpdateAttempts({ serviceId: this.serviceId, category, key, value, body })) {
@@ -720,17 +736,22 @@ export class NitradoClient {
                 body: attempt.body
               });
 
+              let verification = null;
               if (options.verify) {
                 if (options.verifyDelayMs) await sleep(options.verifyDelayMs);
-                await this.verifyGameserverSetting(key, value, `${method} ${attempt.label}`);
+                verification = await this.verifyGameserverSetting(key, value, `${method} ${attempt.label}`, options);
               }
+
+              const verificationNote = verification?.missing
+                ? " ReadSettings does not return this hidden setting, so restart the server and test the password in-game."
+                : "";
 
               return {
                 action: actionLabel,
                 ok: true,
                 message:
                   data?.message ||
-                  `Nitrado accepted ${actionLabel} for ${key}${category ? ` in ${category}` : ""} via ${method} ${attempt.label}. Run /server restart for the change to apply.`
+                  `Nitrado accepted ${actionLabel} for ${key}${category ? ` in ${category}` : ""} via ${method} ${attempt.label}.${verificationNote || " Run /server restart for the change to apply."}`
               };
             } catch (error) {
               errors.push(`${method} ${attempt.label} -> ${error.message || "Unknown error"}`);
@@ -747,11 +768,12 @@ export class NitradoClient {
     );
   }
 
-  async verifyGameserverSetting(key, value, attemptLabel) {
+  async verifyGameserverSetting(key, value, attemptLabel, options = {}) {
     const settings = await this.getGameserverSettings();
     const expected = String(value ?? "");
     const matches = settings.filter((setting) => normalizeKey(setting.key) === normalizeKey(key));
     if (!matches.length) {
+      if (options.allowMissingVerification) return { missing: true };
       throw new NitradoError(`${key} was accepted via ${attemptLabel}, but ReadSettings did not return ${key} for verification.`);
     }
 
@@ -760,6 +782,8 @@ export class NitradoClient {
       const current = matches.map((setting) => maskSettingForError(setting.value)).join(", ");
       throw new NitradoError(`${key} was accepted via ${attemptLabel}, but ReadSettings still shows ${current || "[empty]"}.`);
     }
+
+    return { verified: true };
   }
 }
 
