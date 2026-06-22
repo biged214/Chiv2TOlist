@@ -106,7 +106,7 @@ export class NitradoClient {
         verify: true,
         verifyDelayMs: 1000,
         categories: ["config"],
-        methods: ["POST"],
+        methods: ["PUT", "POST"],
         singlePayload: true,
         allowMissingVerification: true
       }
@@ -124,7 +124,7 @@ export class NitradoClient {
         verify: true,
         verifyDelayMs: 1000,
         categories: ["config"],
-        methods: ["POST"],
+        methods: ["PUT", "POST"],
         singlePayload: true,
         allowMissingVerification: true
       }
@@ -961,10 +961,28 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
     if (isPasswordSetting) {
       return [
         {
-          label: `flat form category/key/value ${category}/${key}`,
-          path: `/services/${serviceId}/gameservers/settings`,
+          label: `path value ${category}/${key}`,
+          path: `/services/${serviceId}/gameservers/settings/${encodedCategory}/${encodedKey}`,
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ category, key, value: stringValue }).toString()
+          body: new URLSearchParams({ value: stringValue }).toString()
+        },
+        {
+          label: `path json value ${category}/${key}`,
+          path: `/services/${serviceId}/gameservers/settings/${encodedCategory}/${encodedKey}`,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ value: stringValue })
+        },
+        {
+          label: `category path key/value ${category}/${key}`,
+          path: `/services/${serviceId}/gameservers/settings/${encodedCategory}`,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ key, value: stringValue }).toString()
+        },
+        {
+          label: `category path nested settings ${category}/${key}`,
+          path: `/services/${serviceId}/gameservers/settings/${encodedCategory}`,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ [`settings[${key}]`]: stringValue }).toString()
         }
       ];
     }
