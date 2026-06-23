@@ -96,27 +96,31 @@ export class NitradoClient {
   }
 
   async setGameserverPassword(password) {
-    return this.updateGameserverSetting(
-      { key: "ServerPassword", path: "base" },
-      password,
-      "set password",
-      {
-        categories: ["base"],
-        methods: ["POST"],
-        singlePayload: true
-      }
-    );
+    return this.updateGameserverPassword(password, "set password");
   }
 
   async removeGameserverPassword() {
+    return this.updateGameserverPassword("", "remove password");
+  }
+
+  async updateGameserverPassword(password, actionLabel) {
+    await this.ensureSettingsCanBeUpdated(actionLabel);
+    const settings = await this.safeGetSettings();
+    const serverName = findSettingValue(settings, "ServerName") || findSettingValue(settings, "server_name") || "";
+    const adminList = findSettingValue(settings, "admin-list") || "";
+    const extraFormFields = {};
+    if (serverName) extraFormFields["form[base][ServerName]"] = serverName;
+    if (adminList) extraFormFields["form[base][admin-list]"] = adminList;
+
     return this.updateGameserverSetting(
       { key: "ServerPassword", path: "base" },
-      "",
-      "remove password",
+      password,
+      actionLabel,
       {
         categories: ["base"],
         methods: ["POST"],
-        singlePayload: true
+        singlePayload: true,
+        extraFormFields
       }
     );
   }
@@ -708,7 +712,7 @@ export class NitradoClient {
     for (const method of methods) {
       for (const category of categories) {
         const categorizedPayloads = options.singlePayload
-          ? [{}]
+          ? [{ extraFormFields: options.extraFormFields || {} }]
           : category
             ? [
                 { category, key, value, option: key },
@@ -898,6 +902,12 @@ function settingCandidates(settings, preferredKeys) {
     }));
 }
 
+function findSettingValue(settings, preferredKey) {
+  const needle = normalizeKey(preferredKey);
+  const setting = settings.find((entry) => normalizeKey(entry.key) === needle);
+  return setting?.value === undefined || setting?.value === null ? "" : String(setting.value);
+}
+
 function normalizeKey(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -954,7 +964,13 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
           label: `web form ${category}/${key}`,
           path: `/services/${serviceId}/gameservers/settings`,
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ category, key, value: stringValue, [`form[${category}][${key}]`]: stringValue }).toString()
+          body: new URLSearchParams({
+            category,
+            key,
+            value: stringValue,
+            ...flattenPayload(body?.extraFormFields || {}),
+            [`form[${category}][${key}]`]: stringValue
+          }).toString()
         }
       ];
     }
