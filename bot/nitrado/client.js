@@ -105,7 +105,7 @@ export class NitradoClient {
 
   async updateGameserverPasswordFile(password, actionLabel) {
     await this.ensureSettingsCanBeUpdated(actionLabel);
-    return this.updateGameConfigFileSetting("ServerPassword", password, actionLabel);
+    return this.updateGameConfigFileSetting("ServerPassword", password, actionLabel, await this.findPasswordConfigFiles());
   }
 
   async setGameserverMaxPlayers(maxPlayers) {
@@ -204,9 +204,9 @@ export class NitradoClient {
     };
   }
 
-  async updateGameConfigFileSetting(key, value, actionLabel) {
+  async updateGameConfigFileSetting(key, value, actionLabel, filesToTry = null) {
     const errors = [];
-    const files = await this.findConfigFiles();
+    const files = filesToTry?.length ? filesToTry : await this.findConfigFiles();
 
     for (const file of files) {
       try {
@@ -410,6 +410,21 @@ export class NitradoClient {
 
     const discovered = await this.discoverConfigFiles().catch(() => []);
     return [...new Set([...discovered, ...likelyFiles])];
+  }
+
+  async findPasswordConfigFiles() {
+    const roots = await this.fileRootHints().catch(() => []);
+    const files = [];
+
+    for (const root of roots) {
+      if (!root.includes("/noftp/")) continue;
+      files.push(
+        `${root}/TBL/Saved/Config/LinuxServer/Game.ini`,
+        `${root}/TBL/Saved/Config/WindowsServer/Game.ini`
+      );
+    }
+
+    return [...new Set(files)];
   }
 
   async discoverConfigFiles() {

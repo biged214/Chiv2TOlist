@@ -1,7 +1,7 @@
 import { PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
 import { NitradoClient } from "../nitrado/client.js";
 
-const commandTimeoutMs = 20000;
+const commandTimeoutMs = 55000;
 
 export const serverCommand = new SlashCommandBuilder()
   .setName("server")
