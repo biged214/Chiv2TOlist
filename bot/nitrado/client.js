@@ -418,10 +418,13 @@ export class NitradoClient {
 
     for (const root of roots) {
       if (!root.includes("/noftp/")) continue;
-      files.push(
-        `${root}/TBL/Saved/Config/LinuxServer/Game.ini`,
-        `${root}/TBL/Saved/Config/WindowsServer/Game.ini`
-      );
+      const candidateRoots = passwordConfigRootVariants(root);
+      for (const candidateRoot of candidateRoots) {
+        files.push(
+          `${candidateRoot}/TBL/Saved/Config/LinuxServer/Game.ini`,
+          `${candidateRoot}/TBL/Saved/Config/WindowsServer/Game.ini`
+        );
+      }
     }
 
     return [...new Set(files)];
@@ -944,6 +947,19 @@ function uniqueSettingTargets(discoveredTargets, fallbackKeys, relatedCategories
 
 function categoryFromPath(path) {
   return String(path || "").split(".").find(Boolean) || "";
+}
+
+function passwordConfigRootVariants(root) {
+  const normalized = normalizeFilePath(root);
+  const variants = [normalized];
+  const noftpIndex = normalized.indexOf("/noftp/");
+
+  if (noftpIndex >= 0) {
+    variants.push(normalized.slice(noftpIndex));
+    variants.push(normalized.slice(noftpIndex + "/noftp".length));
+  }
+
+  return [...new Set(variants.filter(Boolean))];
 }
 
 function flattenPayload(payload) {
