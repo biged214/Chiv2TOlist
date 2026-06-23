@@ -954,7 +954,7 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
           label: `web form ${category}/${key}`,
           path: `/services/${serviceId}/gameservers/settings`,
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ category, [`form[${category}][${key}]`]: stringValue }).toString()
+          body: new URLSearchParams({ category, key, [`form[${category}][${key}]`]: stringValue }).toString()
         }
       ];
     }
