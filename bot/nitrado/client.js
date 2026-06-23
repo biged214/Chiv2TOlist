@@ -106,7 +106,7 @@ export class NitradoClient {
         verify: true,
         verifyDelayMs: 1000,
         categories: ["config"],
-        methods: ["PUT", "POST"],
+        methods: ["PUT", "POST", "PATCH"],
         singlePayload: true,
         allowMissingVerification: true
       }
@@ -124,7 +124,7 @@ export class NitradoClient {
         verify: true,
         verifyDelayMs: 1000,
         categories: ["config"],
-        methods: ["PUT", "POST"],
+        methods: ["PUT", "POST", "PATCH"],
         singlePayload: true,
         allowMissingVerification: true
       }
@@ -961,28 +961,28 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
     if (isPasswordSetting) {
       return [
         {
-          label: `path value ${category}/${key}`,
-          path: `/services/${serviceId}/gameservers/settings/${encodedCategory}/${encodedKey}`,
+          label: `form nested category settings ${category}/${key}`,
+          path: `/services/${serviceId}/gameservers/settings`,
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ value: stringValue }).toString()
+          body: new URLSearchParams({ [`settings[${category}][${key}]`]: stringValue }).toString()
         },
         {
-          label: `path json value ${category}/${key}`,
-          path: `/services/${serviceId}/gameservers/settings/${encodedCategory}/${encodedKey}`,
+          label: `json nested category settings ${category}/${key}`,
+          path: `/services/${serviceId}/gameservers/settings`,
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ value: stringValue })
+          body: JSON.stringify({ settings: { [category]: { [key]: stringValue } } })
         },
         {
-          label: `category path key/value ${category}/${key}`,
-          path: `/services/${serviceId}/gameservers/settings/${encodedCategory}`,
+          label: `form category nested settings ${category}/${key}`,
+          path: `/services/${serviceId}/gameservers/settings`,
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ key, value: stringValue }).toString()
+          body: new URLSearchParams({ category, [`settings[${key}]`]: stringValue }).toString()
         },
         {
-          label: `category path nested settings ${category}/${key}`,
-          path: `/services/${serviceId}/gameservers/settings/${encodedCategory}`,
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ [`settings[${key}]`]: stringValue }).toString()
+          label: `json category settings ${category}/${key}`,
+          path: `/services/${serviceId}/gameservers/settings`,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ category, settings: { [key]: stringValue } })
         }
       ];
     }
