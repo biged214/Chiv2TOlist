@@ -101,12 +101,12 @@ export class NitradoClient {
       password,
       "set password",
       (key) => normalizeKey(key) === "serverpassword",
-      ["category:config"],
+      ["category:base", "category:config"],
       {
         verify: true,
         verifyDelayMs: 1000,
-        categories: ["config"],
-        methods: ["PUT", "POST", "PATCH"],
+        categories: ["base", "config"],
+        methods: ["POST", "PUT", "PATCH"],
         singlePayload: true,
         allowMissingVerification: true
       }
@@ -119,12 +119,12 @@ export class NitradoClient {
       "",
       "remove password",
       (key) => normalizeKey(key) === "serverpassword",
-      ["category:config"],
+      ["category:base", "category:config"],
       {
         verify: true,
         verifyDelayMs: 1000,
-        categories: ["config"],
-        methods: ["PUT", "POST", "PATCH"],
+        categories: ["base", "config"],
+        methods: ["POST", "PUT", "PATCH"],
         singlePayload: true,
         allowMissingVerification: true
       }
@@ -960,6 +960,12 @@ function settingUpdateAttempts({ serviceId, category, key, value, body }) {
   if (category) {
     if (isPasswordSetting) {
       return [
+        {
+          label: `web form ${category}/${key}`,
+          path: `/services/${serviceId}/gameservers/settings`,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ [`form[${category}][${key}]`]: stringValue }).toString()
+        },
         {
           label: `form nested category settings ${category}/${key}`,
           path: `/services/${serviceId}/gameservers/settings`,
