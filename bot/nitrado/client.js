@@ -96,33 +96,16 @@ export class NitradoClient {
   }
 
   async setGameserverPassword(password) {
-    return this.updateGameserverPassword(password, "set password");
+    return this.updateGameserverPasswordFile(password, "set password");
   }
 
   async removeGameserverPassword() {
-    return this.updateGameserverPassword("", "remove password");
+    return this.updateGameserverPasswordFile("", "remove password");
   }
 
-  async updateGameserverPassword(password, actionLabel) {
+  async updateGameserverPasswordFile(password, actionLabel) {
     await this.ensureSettingsCanBeUpdated(actionLabel);
-    const settings = await this.safeGetSettings();
-    const serverName = findSettingValue(settings, "ServerName") || findSettingValue(settings, "server_name") || "";
-    const adminList = findSettingValue(settings, "admin-list") || "";
-    const extraFormFields = {};
-    if (serverName) extraFormFields["form[base][ServerName]"] = serverName;
-    if (adminList) extraFormFields["form[base][admin-list]"] = adminList;
-
-    return this.updateGameserverSetting(
-      { key: "ServerPassword", path: "base" },
-      password,
-      actionLabel,
-      {
-        categories: ["base"],
-        methods: ["POST"],
-        singlePayload: true,
-        extraFormFields
-      }
-    );
+    return this.updateGameConfigFileSetting("ServerPassword", password, actionLabel);
   }
 
   async setGameserverMaxPlayers(maxPlayers) {
@@ -381,6 +364,7 @@ export class NitradoClient {
         `/home/${username}`,
         `/games/${username}`,
         `/games/${username}/ftproot`,
+        `/games/${username}/noftp`,
         `/server/${username}`
       );
       for (const folder of folders) {
@@ -389,6 +373,7 @@ export class NitradoClient {
           `/home/${username}/${folder}`,
           `/games/${username}/${folder}`,
           `/games/${username}/ftproot/${folder}`,
+          `/games/${username}/noftp/${folder}`,
           `/server/${username}/${folder}`
         );
       }
@@ -402,6 +387,8 @@ export class NitradoClient {
     const rootFiles = [];
     for (const root of roots) {
       rootFiles.push(
+        `${root}/TBL/Saved/Config/LinuxServer/Game.ini`,
+        `${root}/TBL/Saved/Config/WindowsServer/Game.ini`,
         `${root}/Chivalry/Saved/Config/LinuxServer/Game.ini`,
         `${root}/Chivalry/Saved/Config/WindowsServer/Game.ini`,
         `${root}/Chivalry/Saved/Config/LinuxServer/Engine.ini`,
