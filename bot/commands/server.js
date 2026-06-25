@@ -22,22 +22,6 @@ export const serverCommand = new SlashCommandBuilder()
         )
       )
   )
-  .addSubcommand((subcommand) =>
-    withServerOption(
-      subcommand
-        .setName("files")
-        .setDescription("List Nitrado file-server entries for troubleshooting.")
-        .addStringOption((option) =>
-          option
-            .setName("path")
-            .setDescription("Directory path to list, such as / or /games.")
-            .setMaxLength(160)
-            .setRequired(false)
-        )
-      )
-  )
-  .addSubcommand((subcommand) => withServerOption(subcommand.setName("filescan").setDescription("Scan common Nitrado file roots.")))
-  .addSubcommand((subcommand) => withServerOption(subcommand.setName("debug").setDescription("Show safe Nitrado service fields for troubleshooting.")))
   .addSubcommand((subcommand) => withServerOption(subcommand.setName("restart").setDescription("Restart the server.")))
   .addSubcommand((subcommand) => withServerOption(subcommand.setName("stop").setDescription("Stop the server.")))
   .addSubcommand((subcommand) =>
@@ -52,28 +36,6 @@ export const serverCommand = new SlashCommandBuilder()
             .setMinLength(3)
             .setMaxLength(80)
             .setRequired(true)
-        )
-      )
-  )
-  .addSubcommand((subcommand) =>
-    withServerOption(
-      subcommand
-        .setName("password")
-        .setDescription("Set or remove the server password.")
-        .addStringOption((option) =>
-          option
-            .setName("mode")
-            .setDescription("Whether to set or remove the password.")
-            .setRequired(true)
-            .addChoices({ name: "Set", value: "set" }, { name: "Remove", value: "remove" })
-        )
-        .addStringOption((option) =>
-          option
-            .setName("value")
-            .setDescription("Password to set. Leave empty when removing.")
-            .setMinLength(1)
-            .setMaxLength(64)
-            .setRequired(false)
         )
       )
   )
@@ -181,39 +143,11 @@ async function runServerSubcommand(subcommand, interaction, nitradoClient) {
     return formatSettings(settings, interaction.options.getInteger("page") || 1);
   }
 
-  if (subcommand === "files") {
-    const path = interaction.options.getString("path") || "/";
-    const result = await nitradoClient.listFiles(path);
-    return formatFiles(path, result);
-  }
-
-  if (subcommand === "filescan") {
-    const results = await nitradoClient.scanFileRoots();
-    return formatFileScan(results);
-  }
-
-  if (subcommand === "debug") {
-    const debug = await nitradoClient.getServiceDebug();
-    return formatDebug(debug);
-  }
-
   if (subcommand === "restart") return nitradoClient.restartGameserver();
   if (subcommand === "stop") return nitradoClient.stopGameserver();
 
   if (subcommand === "rename") {
     return nitradoClient.renameGameserver(interaction.options.getString("name", true));
-  }
-
-  if (subcommand === "password") {
-    const mode = interaction.options.getString("mode", true);
-    if (mode === "remove") return nitradoClient.removeGameserverPassword();
-
-    const password = interaction.options.getString("value");
-    if (!password) {
-      return "Choose `mode:set` and provide `value` to set a password.";
-    }
-
-    return nitradoClient.setGameserverPassword(password);
   }
 
   if (subcommand === "maxplayers") {
@@ -260,73 +194,6 @@ function formatSettings(settings, page) {
   lines.push(`Showing page ${currentPage}/${pageCount}, entries ${start + 1}-${start + selected.length} of ${settings.length}.`);
 
   return lines.join("\n").slice(0, 1900);
-}
-
-function formatFiles(path, result) {
-  const entries = result.entries || [];
-  const displayPath = result.path || path;
-  if (!entries.length) {
-    const keys = result.rawKeys?.length ? ` Returned keys: ${result.rawKeys.join(", ")}.` : "";
-    return `No file-server entries found for ${displayPath}.${keys}`;
-  }
-
-  const lines = [`Entries for ${displayPath}:`];
-  for (const entry of entries.slice(0, 35)) {
-    const type = entry.type === "dir" || entry.isDirectory ? "dir" : "file";
-    lines.push(`${type}: ${entry.path || entry.name}`);
-  }
-
-  lines.push(`Showing ${Math.min(entries.length, 35)} of ${entries.length} entries.`);
-  return lines.join("\n").slice(0, 1900);
-}
-
-function formatFileScan(results) {
-  const lines = ["Nitrado file root scan:"];
-  for (const result of results) {
-    if (result.error) {
-      lines.push(`${result.path}: error ${result.error}`);
-      continue;
-    }
-
-    const sample = result.sample?.length ? ` (${result.sample.join(", ")})` : "";
-    const keys = result.rawKeys?.length ? ` keys:${result.rawKeys.join(",")}` : "";
-    lines.push(`${result.path}: ${result.count} entries${sample}${keys}`);
-  }
-
-  return lines.join("\n").slice(0, 1900);
-}
-
-function formatDebug(debug) {
-  const lines = [`Service ID: ${debug.serviceId}`];
-  lines.push("Service fields:");
-  lines.push(...flattenDebug(debug.service).slice(0, 18));
-  lines.push("Gameserver fields:");
-  lines.push(...flattenDebug(debug.gameserver).slice(0, 22));
-  return lines.join("\n").slice(0, 1900);
-}
-
-function flattenDebug(value, prefix = "", lines = []) {
-  if (!value || typeof value !== "object" || lines.length >= 45) return lines;
-
-  for (const [key, entryValue] of Object.entries(value)) {
-    if (lines.length >= 45) break;
-    const path = prefix ? `${prefix}.${key}` : key;
-    if (entryValue && typeof entryValue === "object" && !Array.isArray(entryValue)) {
-      flattenDebug(entryValue, path, lines);
-      continue;
-    }
-
-    if (Array.isArray(entryValue)) {
-      lines.push(`${path}: [${entryValue.length} items]`);
-      continue;
-    }
-
-    if (entryValue !== undefined && entryValue !== null && entryValue !== "") {
-      lines.push(`${path}: ${String(entryValue).slice(0, 80)}`);
-    }
-  }
-
-  return lines;
 }
 
 function maskSettingValue(key, value) {
