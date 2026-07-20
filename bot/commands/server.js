@@ -2,6 +2,53 @@ import { PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
 import { NitradoClient } from "../nitrado/client.js";
 
 const commandTimeoutMs = 55000;
+const allowedMaps = [
+  "TO_Coxwell",
+  "TO_DarkForest",
+  "TO_Lionspire",
+  "TO_RudhelmSiege",
+  "TO_Galencourt",
+  "TO_Falmire",
+  "TO_Raid",
+  "TO_Stronghold",
+  "TO_Bulwark",
+  "TO_Library",
+  "TO_Bridgetown",
+  "TO_Montcrux",
+  "TO_Citadel",
+  "TDM_Wardenglade",
+  "TDM_Wardenglade_horse",
+  "TDM_TournamentGrounds",
+  "TDM_FightingPit",
+  "TDM_Courtyard",
+  "TDM_Hippodrome",
+  "TDM_Desert",
+  "TDM_FrozenWreck",
+  "FFA_FightingPit",
+  "FFA_Wardenglade",
+  "FFA_TournamentGrounds",
+  "FFA_Courtyard",
+  "FFA_Hippodrome",
+  "FFA_Duelyard",
+  "FFA_Desert",
+  "FFA_Bazaar",
+  "FFA_FrozenWreck",
+  "LTS_Wardenglade",
+  "LTS_TournamentGrounds",
+  "LTS_FightingPit",
+  "LTS_Courtyard",
+  "LTS_Galencourt",
+  "LTS_Falmire",
+  "PR_LTS_Raid",
+  "Brawl_GreatHall",
+  "Brawl_RudhelmHall",
+  "Brawl_Cathedral",
+  "BRAWL_Midsommar",
+  "BOW_Galencourt",
+  "BOW_Falmire",
+  "BOW_Wardenglade"
+];
+const allowedMapLookup = new Map(allowedMaps.map((map) => [normalizeMapKey(map), map]));
 
 export const serverCommand = new SlashCommandBuilder()
   .setName("server")
@@ -51,6 +98,31 @@ export const serverCommand = new SlashCommandBuilder()
             .setMinValue(2)
             .setMaxValue(64)
             .setRequired(true)
+        )
+      )
+  )
+  .addSubcommand((subcommand) =>
+    withServerOption(
+      subcommand
+        .setName("maps")
+        .setDescription("View or update the map rotation.")
+        .addStringOption((option) =>
+          option
+            .setName("action")
+            .setDescription("What to do with the map rotation.")
+            .setRequired(true)
+            .addChoices(
+              { name: "View current rotation", value: "view" },
+              { name: "Set rotation", value: "set" },
+              { name: "Show available maps", value: "available" }
+            )
+        )
+        .addStringOption((option) =>
+          option
+            .setName("maps")
+            .setDescription("Map IDs separated by commas, spaces, or new lines.")
+            .setMaxLength(1900)
+            .setRequired(false)
         )
       )
   )
@@ -154,6 +226,18 @@ async function runServerSubcommand(subcommand, interaction, nitradoClient) {
     return nitradoClient.setGameserverMaxPlayers(interaction.options.getInteger("count", true));
   }
 
+  if (subcommand === "maps") {
+    const action = interaction.options.getString("action", true);
+
+    if (action === "available") return formatAvailableMaps();
+    if (action === "view") return formatMapRotation(await nitradoClient.getMapRotation());
+
+    const parsedMaps = parseMapRotationInput(interaction.options.getString("maps") || "");
+    if (parsedMaps.error) return parsedMaps.error;
+
+    return nitradoClient.setMapRotation(parsedMaps.maps);
+  }
+
   throw new Error(`Unknown server subcommand: ${subcommand}`);
 }
 
@@ -194,6 +278,59 @@ function formatSettings(settings, page) {
   lines.push(`Showing page ${currentPage}/${pageCount}, entries ${start + 1}-${start + selected.length} of ${settings.length}.`);
 
   return lines.join("\n").slice(0, 1900);
+}
+
+function formatMapRotation(maps) {
+  if (!maps.length) return "No maps are currently listed in `map-rotation`.";
+
+  const lines = maps.map((map, index) => `${index + 1}. ${map}`);
+  lines.push(`Showing ${maps.length} map${maps.length === 1 ? "" : "s"} in the current rotation.`);
+  return lines.join("\n").slice(0, 1900);
+}
+
+function formatAvailableMaps() {
+  return [`Available maps (${allowedMaps.length}):`, allowedMaps.join("\n")].join("\n").slice(0, 1900);
+}
+
+function parseMapRotationInput(value) {
+  const rawMaps = String(value || "")
+    .split(/[\s,;]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  if (!rawMaps.length) {
+    return {
+      error: "Provide at least one map ID in `maps:`. Use `/server maps action:available` to see valid map IDs."
+    };
+  }
+
+  const maps = [];
+  const invalid = [];
+  const seen = new Set();
+
+  for (const rawMap of rawMaps) {
+    const map = allowedMapLookup.get(normalizeMapKey(rawMap));
+    if (!map) {
+      invalid.push(rawMap);
+      continue;
+    }
+
+    if (seen.has(map)) continue;
+    seen.add(map);
+    maps.push(map);
+  }
+
+  if (invalid.length) {
+    return {
+      error: `Invalid map ID${invalid.length === 1 ? "" : "s"}: ${invalid.join(", ")}\nUse \`/server maps action:available\` to see valid map IDs.`
+    };
+  }
+
+  return { maps };
+}
+
+function normalizeMapKey(value) {
+  return String(value || "").toLowerCase();
 }
 
 function maskSettingValue(key, value) {

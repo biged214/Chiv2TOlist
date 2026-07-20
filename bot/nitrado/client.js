@@ -116,6 +116,22 @@ export class NitradoClient {
     );
   }
 
+  async getMapRotation() {
+    const settings = await this.getGameserverSettings();
+    return parseSettingLines(findSettingValue(settings, "map-rotation"));
+  }
+
+  async setMapRotation(maps) {
+    return this.updateFirstSetting(
+      ["map-rotation", "map_rotation", "MapRotation"],
+      maps.join("\n"),
+      "update map rotation",
+      (key) => normalizeKey(key) === "maprotation",
+      ["category:config"],
+      { categories: ["config"] }
+    );
+  }
+
   async gameserverAction(action) {
     const data = await this.request(`/services/${this.serviceId}/gameservers/${action}`, {
       method: "POST"
@@ -911,6 +927,13 @@ function findSettingValue(settings, preferredKey) {
   const needle = normalizeKey(preferredKey);
   const setting = settings.find((entry) => normalizeKey(entry.key) === needle);
   return setting?.value === undefined || setting?.value === null ? "" : String(setting.value);
+}
+
+function parseSettingLines(value) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 function normalizeKey(value) {
