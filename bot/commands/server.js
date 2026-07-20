@@ -1,7 +1,16 @@
-import { PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  PermissionFlagsBits,
+  SlashCommandBuilder,
+  StringSelectMenuBuilder
+} from "discord.js";
 import { NitradoClient } from "../nitrado/client.js";
 
 const commandTimeoutMs = 55000;
+const mapPickerSessionTtlMs = 15 * 60 * 1000;
+const mapPickerSessions = new Map();
 const allowedMaps = [
   "TO_Coxwell",
   "TO_DarkForest",
@@ -49,6 +58,10 @@ const allowedMaps = [
   "BOW_Wardenglade"
 ];
 const allowedMapLookup = new Map(allowedMaps.map((map) => [normalizeMapKey(map), map]));
+const mapPickerGroups = [
+  { id: "siege", label: "Siege and Team Deathmatch maps", maps: allowedMaps.slice(0, 21) },
+  { id: "other", label: "Free-for-all, LTS, Brawl, and Bow maps", maps: allowedMaps.slice(21) }
+];
 
 export const serverCommand = new SlashCommandBuilder()
   .setName("server")
@@ -113,14 +126,14 @@ export const serverCommand = new SlashCommandBuilder()
             .setRequired(true)
             .addChoices(
               { name: "View current rotation", value: "view" },
-              { name: "Set rotation", value: "set" },
+              { name: "Edit rotation", value: "set" },
               { name: "Show available maps", value: "available" }
             )
         )
         .addStringOption((option) =>
           option
             .setName("maps")
-            .setDescription("Map IDs separated by commas, spaces, or new lines.")
+            .setDescription("Optional: map IDs separated by commas, spaces, or new lines.")
             .setMaxLength(1900)
             .setRequired(false)
         )
@@ -154,6 +167,18 @@ export async function handleServerCommand(interaction, { getNitradoCredentials, 
     }
 
     const nitradoClient = new NitradoClient(credentials);
+
+    if (isMapPickerRequest(subcommand, interaction)) {
+      const currentMaps = await withCommandTimeout(nitradoClient.getMapRotation());
+      const session = createMapPickerSession({
+        userId: interaction.user.id,
+        nitradoClient,
+        maps: currentMaps
+      });
+      await interaction.editReply(renderMapPicker(session));
+      return;
+    }
+
     const result = await withCommandTimeout(runServerSubcommand(subcommand, interaction, nitradoClient));
 
     if (typeof result === "string") {
@@ -166,6 +191,83 @@ export async function handleServerCommand(interaction, { getNitradoCredentials, 
     console.error(`Discord /server ${subcommand} failed:`, error);
     await interaction.editReply(formatNitradoError(error));
   }
+}
+
+export async function handleServerComponentInteraction(interaction, { allowedRoleIds }) {
+  if (!interaction.customId?.startsWith("server_maps:")) return false;
+
+  const [, sessionId, action] = interaction.customId.split(":");
+  const session = getMapPickerSession(sessionId);
+
+  if (!session) {
+    await interaction.reply({
+      content: "This map editor expired. Run `/server maps action:set` to open a new one.",
+      ephemeral: true
+    });
+    return true;
+  }
+
+  if (interaction.user.id !== session.userId) {
+    await interaction.reply({
+      content: "Only the person who opened this map editor can change it.",
+      ephemeral: true
+    });
+    return true;
+  }
+
+  if (!canControlServer(interaction, allowedRoleIds)) {
+    await interaction.reply({
+      content: "You need Manage Server permission or an allowed bot-control role to use this.",
+      ephemeral: true
+    });
+    return true;
+  }
+
+  if (action === "cancel") {
+    mapPickerSessions.delete(sessionId);
+    await interaction.update({ content: "Map editor closed without saving changes.", components: [] });
+    return true;
+  }
+
+  if (action === "save") {
+    if (!session.maps.size) {
+      await interaction.update({
+        ...renderMapPicker(session),
+        content: `${renderMapPicker(session).content}\n\nChoose at least one map before saving.`
+      });
+      return true;
+    }
+
+    await interaction.deferUpdate();
+    try {
+      const maps = allowedMaps.filter((map) => session.maps.has(map));
+      const result = await withCommandTimeout(session.nitradoClient.setMapRotation(maps));
+      mapPickerSessions.delete(sessionId);
+      await interaction.editReply({
+        content: `Done: ${result.message}\nSaved ${maps.length} map${maps.length === 1 ? "" : "s"}.`,
+        components: []
+      });
+    } catch (error) {
+      console.error("Discord map rotation save failed:", error);
+      await interaction.editReply({
+        ...renderMapPicker(session),
+        content: `${renderMapPicker(session).content}\n\n${formatNitradoError(error)}`
+      });
+    }
+    return true;
+  }
+
+  const group = mapPickerGroups.find((entry) => entry.id === action);
+  if (!group || !interaction.isStringSelectMenu()) {
+    await interaction.reply({ content: "That map editor action is no longer valid.", ephemeral: true });
+    return true;
+  }
+
+  for (const map of group.maps) session.maps.delete(map);
+  for (const map of interaction.values) session.maps.add(map);
+  session.expiresAt = Date.now() + mapPickerSessionTtlMs;
+  await interaction.update(renderMapPicker(session));
+  return true;
 }
 
 function withCommandTimeout(promise) {
@@ -239,6 +341,82 @@ async function runServerSubcommand(subcommand, interaction, nitradoClient) {
   }
 
   throw new Error(`Unknown server subcommand: ${subcommand}`);
+}
+
+function isMapPickerRequest(subcommand, interaction) {
+  return (
+    subcommand === "maps" &&
+    interaction.options.getString("action", true) === "set" &&
+    !interaction.options.getString("maps")
+  );
+}
+
+function createMapPickerSession({ userId, nitradoClient, maps }) {
+  const selectedMaps = new Set();
+  for (const map of maps) {
+    const normalized = allowedMapLookup.get(normalizeMapKey(map));
+    if (normalized) selectedMaps.add(normalized);
+  }
+
+  const session = {
+    id: crypto.randomUUID(),
+    userId,
+    nitradoClient,
+    maps: selectedMaps,
+    expiresAt: Date.now() + mapPickerSessionTtlMs
+  };
+  mapPickerSessions.set(session.id, session);
+  return session;
+}
+
+function getMapPickerSession(sessionId) {
+  const session = mapPickerSessions.get(sessionId);
+  if (!session || session.expiresAt < Date.now()) {
+    mapPickerSessions.delete(sessionId);
+    return null;
+  }
+  return session;
+}
+
+function renderMapPicker(session) {
+  const selectedCount = session.maps.size;
+  const components = mapPickerGroups.map((group) => {
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId(`server_maps:${session.id}:${group.id}`)
+      .setPlaceholder(group.label)
+      .setMinValues(0)
+      .setMaxValues(group.maps.length)
+      .addOptions(
+        group.maps.map((map) => ({
+          label: map,
+          value: map,
+          default: session.maps.has(map)
+        }))
+      );
+    return new ActionRowBuilder().addComponents(menu);
+  });
+
+  components.push(
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`server_maps:${session.id}:save`)
+        .setLabel("Save rotation")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`server_maps:${session.id}:cancel`)
+        .setLabel("Cancel")
+        .setStyle(ButtonStyle.Secondary)
+    )
+  );
+
+  return {
+    content: [
+      `Map rotation editor: ${selectedCount} selected.`,
+      "Current maps are preselected. Choose any combination; saved maps follow the catalog order.",
+      "Stop the Nitrado server before selecting Save. This editor expires in 15 minutes."
+    ].join("\n"),
+    components
+  };
 }
 
 function formatStatus(server) {

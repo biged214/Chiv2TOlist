@@ -1,6 +1,6 @@
 import { Client, Events, GatewayIntentBits } from "discord.js";
 import { getBotConfig, hasRequiredBotConfig } from "./env.js";
-import { handleServerCommand } from "./commands/server.js";
+import { handleServerCommand, handleServerComponentInteraction } from "./commands/server.js";
 import { handleNitradoCommand, handleNitradoLinkModal } from "./commands/nitrado.js";
 import { registerBotCommands } from "./registerCommands.js";
 import { getGuildServerByAlias, getGuildServerStorageStatus } from "./storage/guildServers.js";
@@ -60,6 +60,13 @@ export async function startDiscordBot() {
         await handleNitradoLinkModal(interaction);
       }
       return;
+    }
+
+    if (interaction.isStringSelectMenu() || interaction.isButton()) {
+      const handled = await handleServerComponentInteraction(interaction, {
+        allowedRoleIds: config.allowedRoleIds
+      });
+      if (handled) return;
     }
 
     if (!interaction.isChatInputCommand()) return;
